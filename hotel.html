@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- BEGIN PAGE -->
+<title>Grand Aurora Hotel</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Layout: full-bleed 3D canvas; midnight-blue storybook panels pinned to the corners, gold hairlines and a rose accent for the rides. */
+  :root {
+    --ink: #0f1432;
+    --panel: rgba(16, 22, 58, 0.74);
+    --panel-solid: #161d48;
+    --line: rgba(242, 196, 109, 0.4);
+    --gold: #f2c46d;
+    --rose: #f4a6c0;
+    --cream: #fff3dc;
+    --muted: #b4b9d6;
+    /* system fonts only: nothing external can hold up the first paint */
+    --display: Didot, "Bodoni 72", "Bodoni MT", Georgia, "Songti TC", "Noto Serif TC", serif;
+    --body: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", Roboto, sans-serif;
+    --gut-l: max(16px, env(safe-area-inset-left, 0px));
+    --gut-r: max(16px, env(safe-area-inset-right, 0px));
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden; background: var(--ink); color: var(--cream);
+    font: 14px/1.45 var(--body); -webkit-user-select: none; user-select: none;
+    touch-action: none;
+  }
+  #scene { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  kbd {
+    font: 600 11px/1 var(--body); color: var(--gold); border: 1px solid var(--line);
+    border-radius: 4px; padding: 3px 5px; min-width: 1.2em; display: inline-block; text-align: center;
+  }
+  .stars { color: var(--gold); letter-spacing: 0.35em; font-size: 12px; }
+  .brand { font-family: var(--display); letter-spacing: 0.32em; text-transform: uppercase; }
+
+  /* loader + intro */
+  .screen {
+    position: fixed; inset: 0; display: grid; place-items: center; z-index: 20;
+    padding-left: var(--gut-l); padding-right: var(--gut-r);
+  }
+  #loader { background: radial-gradient(ellipse at 50% 35%, #2b2f78 0%, var(--ink) 72%); }
+  .load-col { display: grid; gap: 14px; justify-items: center; text-align: center; width: min(420px, 100%); }
+  .load-col h1 { margin: 0; font-size: clamp(28px, 7vw, 44px); font-weight: 400; }
+  .load-col .sub { color: var(--muted); letter-spacing: 0.2em; font-size: 11px; text-transform: uppercase; }
+  .track { width: 100%; height: 1px; background: var(--line); overflow: hidden; margin-top: 10px; }
+  #load-bar { height: 100%; background: var(--gold); transform: scaleX(0); transform-origin: left; transition: transform .2s; }
+  #load-text { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; min-height: 1.4em; }
+
+  #intro { background: linear-gradient(180deg, rgba(15,20,50,0.12), rgba(15,20,50,0.7)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 2px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    padding: 28px clamp(18px, 4vw, 34px); width: min(520px, 100%); display: grid; gap: 16px;
+  }
+  .card h2 { margin: 0; font: 400 clamp(24px, 5vw, 32px)/1.15 var(--display); text-wrap: balance; }
+  .card p { margin: 0; color: var(--muted); max-width: 62ch; }
+  .controls { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; align-items: center; font-size: 13px; }
+  .controls dt { white-space: nowrap; }
+  .controls dd { margin: 0; color: var(--muted); }
+  .touch-only { display: none; }
+  @media (pointer: coarse) { .touch-only { display: block; } .mouse-only { display: none; } }
+  .enter {
+    justify-self: start; background: var(--gold); color: var(--ink); border: 0; border-radius: 2px;
+    padding: 12px 22px; font-weight: 600; letter-spacing: 0.08em;
+  }
+  .enter:hover { background: var(--cream); }
+
+  /* HUD */
+  .hud { position: fixed; z-index: 10; pointer-events: none; }
+  .hud > * { pointer-events: auto; }
+  #where {
+    top: max(14px, env(safe-area-inset-top, 0px)); left: var(--gut-l);
+    display: grid; gap: 2px; padding: 10px 14px; background: var(--panel); border-left: 2px solid var(--gold);
+  }
+  #place-zh { font: 400 18px/1.2 var(--display); letter-spacing: 0.06em; }
+  #place-en { font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
+  #mapbox {
+    top: max(14px, env(safe-area-inset-top, 0px)); right: var(--gut-r);
+    background: var(--panel); border: 1px solid var(--line); padding: 8px; display: grid; gap: 6px;
+  }
+  #minimap { width: 132px; height: 248px; display: block; }
+  #mapbox .north { font-size: 10px; letter-spacing: 0.2em; color: var(--muted); text-align: center; }
+  #bottom {
+    left: 0; right: 0; bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    padding-left: var(--gut-l); padding-right: var(--gut-r);
+    display: flex; gap: 10px; align-items: flex-end; justify-content: space-between; pointer-events: none;
+  }
+  #places { display: flex; gap: 6px; overflow-x: auto; min-width: 0; scrollbar-width: none; pointer-events: auto; padding-bottom: 2px; }
+  #places::-webkit-scrollbar { display: none; }
+  .chip {
+    display: inline-flex; gap: 7px; align-items: center; white-space: nowrap; flex: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 2px; padding: 7px 11px 7px 8px;
+  }
+  .chip:hover { border-color: var(--gold); }
+  .tools { display: flex; gap: 6px; flex: none; pointer-events: auto; }
+  .tool {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 2px; padding: 8px 11px;
+    font-size: 12.5px; white-space: nowrap;
+  }
+  .tool[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
+  #crosshair {
+    position: fixed; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%;
+    background: var(--cream); opacity: 0.7; z-index: 5; pointer-events: none; box-shadow: 0 0 0 1px rgba(0,0,0,0.4);
+  }
+  .seat {
+    position: fixed; left: 50%; top: calc(50% + 46px); transform: translateX(-50%); z-index: 9;
+    display: inline-flex; gap: 8px; align-items: center; padding: 8px 14px;
+    background: var(--panel); border: 1px solid var(--gold); border-radius: 2px; color: var(--cream);
+    font-size: 14px; letter-spacing: 0.06em;
+  }
+  .seat kbd { display: inline-block; }
+  @media (pointer: coarse) { .seat { top: auto; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); padding: 12px 22px; font-size: 16px; } .seat kbd { display: none; } }
+  .seat.ride { border-color: var(--rose); }
+  .ride-hud {
+    position: fixed; left: 50%; top: max(14px, env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 9;
+    display: inline-flex; gap: 10px; align-items: center; padding: 8px 14px; white-space: nowrap;
+    background: var(--panel); border: 1px solid var(--rose); border-radius: 999px; font-size: 13px;
+  }
+  .ride-hud b { font: 400 15px/1 var(--display); color: var(--rose); letter-spacing: 0.06em; }
+  .ride-hud span { color: var(--muted); }
+  @media (max-width: 640px) { .ride-hud { top: auto; bottom: calc(210px + env(safe-area-inset-bottom, 0px)); } }
+  @media (pointer: coarse) { .ride-hud .touch-only { display: inline; } }
+  .lift {
+    position: fixed; right: var(--gut-r); top: 50%; transform: translateY(-50%); z-index: 9;
+    background: var(--panel); border: 1px solid var(--line); padding: 12px; display: grid; gap: 8px; min-width: 176px;
+  }
+  .lift-head { font: 400 12px/1 var(--display); letter-spacing: 0.24em; color: var(--gold); }
+  .lift-status { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
+  .lift .floors { display: grid; gap: 6px; }
+  .lift button {
+    display: grid; grid-template-columns: auto auto 1fr; gap: 8px; align-items: center; text-align: left;
+    background: transparent; border: 1px solid var(--line); border-radius: 2px; padding: 8px 10px;
+  }
+  .lift button b { font: 400 16px/1 var(--display); color: var(--cream); min-width: 2ch; }
+  .lift button span { font-size: 12.5px; color: var(--muted); }
+  .lift button.here { border-color: var(--gold); }
+  .lift button.here b { color: var(--gold); }
+  .lift button.going { background: rgba(242, 196, 109, 0.18); border-color: var(--gold); }
+  @media (pointer: coarse) { .lift kbd { display: none; } .lift button { padding: 11px 12px; } }
+  #underwater { position: fixed; inset: 0; background: rgba(20, 120, 160, 0.38); z-index: 4; pointer-events: none; mix-blend-mode: multiply; }
+  #warp {
+    position: fixed; inset: 0; z-index: 30; pointer-events: none;
+    background: radial-gradient(circle at 50% 50%, #fff6e8 0%, #f6d6ff 45%, #b9a2ff 100%);
+    animation: warp-in .6s ease forwards;
+  }
+  #warp.out { animation: warp-out .7s ease forwards; }
+  @keyframes warp-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes warp-out { from { opacity: 1; } to { opacity: 0; } }
+  .tool.portal { border-color: rgba(214, 150, 255, 0.7); color: #e9d2ff; }
+  @media (prefers-reduced-motion: reduce) { #warp, #warp.out { animation-duration: .01s; } }
+  .dialog {
+    position: fixed; left: 50%; transform: translateX(-50%); z-index: 11;
+    bottom: calc(70px + env(safe-area-inset-bottom, 0px)); width: min(600px, calc(100% - 32px));
+    background: var(--panel); border: 1px solid var(--gold); border-radius: 4px; padding: 14px 18px 12px;
+    display: grid; gap: 6px; cursor: pointer; pointer-events: auto;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .dialog-name { font: 400 13px/1 var(--display); letter-spacing: 0.12em; color: var(--gold); }
+  .dialog-text { font-size: 16px; line-height: 1.6; min-height: 3.2em; color: var(--cream); }
+  .dialog-foot { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); }
+  .dialog:not(.more) .dialog-hint { visibility: hidden; }
+  @media (max-width: 640px) { .dialog { bottom: calc(118px + env(safe-area-inset-bottom, 0px)); } .dialog-text { font-size: 15px; } }
+  .dialog-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; margin-top: 2px; }
+  .dialog-opts[hidden] { display: none; }
+  .dialog-opts button {
+    display: flex; gap: 8px; align-items: center; text-align: left; cursor: pointer;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); border-radius: 3px;
+    color: var(--cream); padding: 8px 10px; font: 500 14px/1.25 var(--body);
+  }
+  .dialog-opts button:hover { border-color: var(--gold); background: rgba(242, 196, 109, 0.12); }
+  .dialog-opts button.quiet { color: var(--muted); border-style: dashed; }
+  .dialog-opts kbd, .photo-bar kbd, .photo-view kbd { font: 600 11px/1 var(--body); color: var(--gold); border: 1px solid var(--line); border-radius: 2px; padding: 2px 5px; }
+  .dialog .h-pick, .dialog.choose .h-next { display: none; }
+  .dialog.choose .h-pick { display: inline; }
+  .dialog.choose .dialog-hint { visibility: visible; }
+  .dialog.mini { width: min(440px, calc(100% - 32px)); padding: 10px 16px; gap: 6px; }
+  .dialog.mini .dialog-text { min-height: 0; font-size: 15px; }
+  .dialog.mini .dialog-foot { display: none; }
+  @media (pointer: coarse) { .dialog-opts kbd, .photo-bar kbd, .photo-view kbd { display: none; } .dialog-opts button { padding: 10px 12px; } }
+  @media (max-width: 640px) { .dialog-opts { grid-template-columns: repeat(3, 1fr); gap: 5px; } .dialog-opts button { font-size: 13px; padding: 9px 7px; } .dialog { padding: 12px 14px 10px; } }
+  #warp.fade { background: #0b1030; }
+  .photo-frame {
+    position: fixed; left: 50%; top: 50%; z-index: 5; pointer-events: none;
+    height: min(100vh, 125vw); aspect-ratio: 4 / 5; transform: translate(-50%, -50%);
+    border: 2px solid rgba(255, 255, 255, 0.75); box-shadow: 0 0 0 100vmax rgba(8, 10, 30, 0.35);
+  }
+  .photo-count {
+    position: fixed; left: 50%; top: 42%; z-index: 12; transform: translate(-50%, -50%); pointer-events: none;
+    font: 400 120px/1 var(--display); color: #fff; text-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  }
+  .photo-count.go { animation: count-pop .9s ease-out; }
+  @keyframes count-pop { from { transform: translate(-50%, -50%) scale(1.6); opacity: 0; } 30% { opacity: 1; } to { transform: translate(-50%, -50%) scale(1); opacity: 0.85; } }
+  .photo-bar, .photo-view .photo-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .photo-bar {
+    position: fixed; left: 50%; transform: translateX(-50%); z-index: 11; bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+    width: min(600px, calc(100% - 32px)); padding: 10px; background: var(--panel); border: 1px solid var(--gold); border-radius: 4px;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .photo-bar .photo-poses, .photo-bar .photo-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .photo-bar button, .photo-view button, .photo-view .btn {
+    display: inline-flex; gap: 7px; align-items: center; cursor: pointer; text-decoration: none;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); border-radius: 3px; color: var(--cream); padding: 9px 12px; font: 500 14px/1 var(--body);
+  }
+  .photo-bar button[aria-pressed="true"] { border-color: var(--gold); background: rgba(242, 196, 109, 0.18); }
+  .photo-bar .shoot, .photo-view .btn { background: var(--gold); color: var(--ink); border-color: var(--gold); font-weight: 600; }
+  .photo-bar .shoot kbd { color: var(--ink); border-color: rgba(0, 0, 0, 0.3); }
+  .photo-bar.busy { opacity: 0.4; pointer-events: none; }
+  @media (max-width: 640px) { .photo-bar { bottom: calc(118px + env(safe-area-inset-bottom, 0px)); } }
+  .photo-view {
+    position: fixed; inset: 0; z-index: 20; display: grid; place-content: center; justify-items: center; gap: 12px; padding: 16px;
+    background: rgba(8, 10, 30, 0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  .photo-view[hidden] { display: none; }
+  .photo-view .polaroid { animation: develop .6s ease-out; }
+  .photo-view .polaroid > * { display: block; height: min(64vh, 112vw); width: auto; max-width: calc(100vw - 32px); object-fit: contain; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); transform: rotate(-1.5deg); }
+  @keyframes develop { from { opacity: 0; transform: scale(0.92) translateY(12px); } to { opacity: 1; transform: none; } }
+  .photo-hint { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .pop {
+    position: fixed; left: 50%; top: 40%; z-index: 12; pointer-events: none; transform: translate(-50%, -50%);
+    font-size: 96px; line-height: 1; filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.35));
+  }
+  .pop.go { animation: emoji-pop 1s ease-out forwards; }
+  @keyframes emoji-pop { 0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; } 25% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; } 60% { transform: translate(-50%, -55%) scale(1); opacity: 1; } 100% { transform: translate(-50%, -70%) scale(1); opacity: 0; } }
+  .npc-toast {
+    position: fixed; left: 50%; top: 30%; z-index: 12; pointer-events: none; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid #ff8fb5; border-radius: 999px; padding: 8px 18px; font-size: 15px; color: var(--cream); white-space: nowrap;
+  }
+  .npc-toast.go { animation: toast-in 2.2s ease forwards; }
+  @keyframes toast-in { 0% { opacity: 0; transform: translate(-50%, 8px); } 12%, 80% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, -6px); } }
+  #flash { position: fixed; inset: 0; z-index: 19; pointer-events: none; }
+  #flash.white { background: #fff; }
+  #flash.love { background: radial-gradient(circle at 50% 50%, rgba(255, 150, 190, 0) 35%, rgba(255, 120, 170, 0.45) 100%); }
+  #flash.go { animation: flash-out .5s ease-out forwards; }
+  #flash.love.go { animation-duration: 1.2s; }
+  @keyframes flash-out { from { opacity: 1; } to { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .pop.go, .npc-toast.go, #flash.go, .photo-count.go, .photo-view .polaroid { animation-duration: .01s; } }
+  .skin-row { display: grid; gap: 8px; }
+  .skin-row[hidden] { display: none; }
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+  .swatches button { width: 30px; height: 30px; border-radius: 50%; background: var(--sw); border: 2px solid rgba(255, 255, 255, 0.25); cursor: pointer; padding: 0; }
+  .swatches button[aria-pressed="true"] { border-color: var(--gold); box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--gold); }
+  .chars { max-height: calc(100% - 140px); overflow-y: auto; z-index: 12; }
+  @media (max-width: 640px) { .chars { top: 64px; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); transform: none; max-height: none; } }
+  .chars .head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .chars .close { background: none; border: 0; color: var(--muted); font-size: 18px; padding: 0 4px; }
+  .chars button[data-char], .chars button[data-avatar] { grid-template-columns: auto 1fr auto; }
+  .chars button[data-avatar] i { font-style: normal; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .chars button[data-avatar][aria-pressed="true"] { border-color: var(--gold); }
+  .chars button[data-avatar][aria-pressed="true"] i { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+  .chars button[data-char] i { font-style: normal; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .chars button[aria-pressed="true"] { border-color: var(--gold); }
+  .chars button[aria-pressed="true"] i { background: var(--gold); color: var(--ink); border-color: var(--gold); }
+  #help { z-index: 15; background: rgba(15,20,50,0.35); }
+  #help .credits { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  #stick {
+    position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; z-index: 6;
+    border: 1px solid var(--line); background: rgba(15,20,50,0.25); pointer-events: none;
+  }
+  #stick span {
+    position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%;
+    background: rgba(242,196,109,0.55);
+  }
+  @media (max-width: 640px) {
+    #minimap { width: 84px; height: 158px; }
+    .tool { padding: 7px 7px; font-size: 12px; }
+    .tools { gap: 5px; flex-wrap: wrap; }
+    #bottom { flex-direction: column-reverse; align-items: stretch; }
+    .tools { justify-content: flex-end; }
+  }
+  @media (prefers-reduced-motion: reduce) { #load-bar { transition: none; } }
+</style>
+</head>
+<body>
+<canvas id="scene" tabindex="0" aria-label="Aurora World：飯店與主題樂園 3D 場景"></canvas>
+<div id="underwater" hidden></div>
+<div id="warp" hidden></div>
+<section id="portal-panel" class="lift" hidden aria-label="傳送門">
+  <div class="lift-head">PORTAL · 傳送門</div>
+  <div class="lift-status">要去哪裡？</div>
+  <div class="floors"></div>
+</section>
+<section id="dialog" class="dialog" hidden aria-live="polite">
+  <div id="dialog-name" class="dialog-name">奧蘿拉熊</div>
+  <div id="dialog-text" class="dialog-text"></div>
+  <div id="dialog-opts" class="dialog-opts" hidden></div>
+  <div class="dialog-foot"><span class="dialog-step"></span><span class="dialog-hint"><span class="h-next"><span class="mouse-only">按 E 或點一下 繼續</span><span class="touch-only">點一下繼續</span></span><span class="h-pick"><span class="mouse-only">按數字鍵或點選</span><span class="touch-only">點選一個選項</span></span></span></div>
+</section>
+<div id="photo-frame" class="photo-frame" hidden></div>
+<div id="photo-count" class="photo-count" hidden aria-live="assertive">3</div>
+<section id="photo-bar" class="photo-bar" hidden aria-label="拍照">
+  <div class="photo-poses">
+    <button type="button" data-pose="peace" aria-pressed="true"><kbd>1</kbd>YA ✌️</button>
+    <button type="button" data-pose="cheer" aria-pressed="false"><kbd>2</kbd>歡呼 🙌</button>
+    <button type="button" data-pose="heart" aria-pressed="false"><kbd>3</kbd>比心 ❤️</button>
+  </div>
+  <div class="photo-acts">
+    <button type="button" id="photo-shoot" class="shoot"><kbd>E</kbd>拍照 📸</button>
+    <button type="button" id="photo-end"><kbd>Q</kbd>結束</button>
+  </div>
+</section>
+<section id="photo-view" class="photo-view" hidden aria-label="照片">
+  <div class="polaroid"></div>
+  <p class="photo-hint"><span class="mouse-only">在照片上按右鍵即可另存圖片</span><span class="touch-only">長按照片即可儲存</span></p>
+  <div class="photo-acts">
+    <a id="photo-save" class="btn" download="grand-aurora-bear.jpg" href="#">下載照片</a>
+    <button type="button" id="photo-again"><kbd>E</kbd>再拍一張</button>
+    <button type="button" id="photo-close"><kbd>Q</kbd>結束拍照</button>
+  </div>
+</section>
+<div id="pop" class="pop" hidden aria-hidden="true"></div>
+<div id="npc-toast" class="npc-toast" hidden aria-live="polite"></div>
+<div id="flash" hidden></div>
+<section id="char-panel" class="lift chars" hidden aria-label="角色">
+  <div class="head"><div class="lift-head">CHARACTERS · 角色</div><button class="close" type="button" aria-label="關閉">×</button></div>
+  <div class="lift-status">點選開啟或關閉角色</div>
+  <div class="floors"></div><div hidden>
+  <div class="lift-status">你的替身（第三人稱和合照時看得到）</div>
+  <div id="avatar-pick" class="floors"></div>
+  <div class="lift-status">衣服顏色</div>
+  <div id="avatar-colors" class="swatches"></div></div>
+  <div id="avatar-skin-row" class="skin-row" hidden><div class="lift-status">膚色</div><div id="avatar-skin" class="swatches"></div></div>
+</section>
+<section id="lift-panel" class="lift" hidden aria-label="電梯">
+  <div class="lift-head">ELEVATOR · 電梯</div>
+  <div id="lift-status" class="lift-status" aria-live="polite">目前 1F</div>
+  <div class="floors"></div>
+</section>
+<div id="crosshair"></div>
+<div id="stick" hidden><span></span></div>
+<div id="ride-hud" class="ride-hud" hidden aria-live="polite"><b id="ride-name">旋轉木馬</b><span>搭乘中 · <span class="mouse-only">按 E 下車</span><span class="touch-only">點「下車」離開</span></span></div>
+<button id="seat-btn" class="seat" type="button" hidden><kbd class="mouse-only">E</kbd><span>坐下</span></button>
+
+<section id="loader" class="screen" aria-live="polite">
+  <div class="load-col">
+    <div class="stars" aria-hidden="true">✦ ★ ✦</div>
+    <h1 class="brand" id="brand">Grand Aurora Hotel</h1>
+    <div class="sub" id="brand-sub">Hotel &amp; Residences</div>
+    <div class="track"><div id="load-bar"></div></div>
+    <div id="load-text">準備中…</div>
+  </div>
+</section>
+
+<section id="intro" class="screen" hidden>
+  <div class="card">
+    <div class="stars" aria-hidden="true">✦ ★ ✦</div>
+    <h2>歡迎來到 Grand Aurora 大飯店</h2>
+    <p>五星級的 Grand Aurora 大飯店：大廳、咖啡廳、自助餐廳、健身房、泳池、客房、總統套房和頂樓空中酒吧都可以自由逛。大廳西側的電梯可以上下樓；大廳入口旁的吉祥物奧蘿拉熊可以聊天、帶路和拍照。<b id='intro-where' hidden></b></p>
+    <dl class="controls mouse-only">
+      <dt><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></dt><dd>行走（滑鼠轉動視角）</dd>
+      <dt><kbd>Shift</kbd></dt><dd>快跑</dd>
+      <dt><kbd>Space</kbd></dt><dd>跳躍</dd>
+      <dt><kbd>E</kbd></dt><dd>和熊熊對話；坐下 / 起身；在電梯門前呼叫電梯；開門</dd>
+      <dt><kbd>F</kbd></dt><dd>切換飛行模式（<kbd>E</kbd> 上升、<kbd>Q</kbd> 下降）</dd>
+      <dt><kbd>1</kbd>–<kbd>0</kbd></dt><dd>瞬間移動到目前世界的各區域</dd>
+      <dt><kbd>Esc</kbd></dt><dd>釋放滑鼠</dd>
+    </dl>
+    <dl class="controls touch-only">
+      <dt>左半邊拖曳</dt><dd>行走（推到底會快跑）</dd>
+      <dt>右半邊拖曳</dt><dd>轉動視角</dd>
+      <dt>對話 / 坐下 / 電梯</dt><dd>走到熊熊、椅子、電梯或門前，點畫面中間出現的按鈕</dd>
+      <dt>下方按鈕</dt><dd>瞬間移動、飛行模式、地圖</dd>
+    </dl>
+    <button id="btn-enter" class="enter" type="button">開始探索</button>
+  </div>
+</section>
+
+<section id="help" class="screen" hidden>
+  <div class="card">
+    <h2>操作說明</h2>
+    <dl class="controls">
+      <dt><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> / 方向鍵</dt><dd>行走，<kbd>Shift</kbd> 快跑，<kbd>Space</kbd> 跳躍</dd>
+      <dt>滑鼠</dt><dd>點一下畫面鎖定滑鼠後轉動視角；無法鎖定時按住拖曳</dd>
+      <dt><kbd>E</kbd></dt><dd>和熊熊對話；坐下 / 起身；飯店電梯門前呼叫電梯（進電梯後按 <kbd>1</kbd>–<kbd>5</kbd> 選樓層）</dd>
+      <dt><kbd>F</kbd></dt><dd>飛行模式，可穿牆；<kbd>E</kbd>/<kbd>Q</kbd> 升降</dd>
+      <dt><kbd>1</kbd>–<kbd>0</kbd></dt><dd>瞬間移動</dd>
+      <dt><kbd>M</kbd> / <kbd>H</kbd></dt><dd>地圖 / 說明</dd>
+      <dt>角色</dt><dd>走近角色按 <kbd>E</kbd> 對話，用數字鍵或點選選單：介紹、帶路（跟著走或直接過去）、拍照、擊掌、抱抱；抬頭看著熊熊的頭按 <kbd>E</kbd> 可以摸摸頭。右下角「角色」可以開啟或關閉每個角色</dd>
+      <dt>陪伴模式</dt><dd>對熊熊選「陪我逛逛 💞」，她就會一直跟著你，連搭電梯也一起；面向她按 <kbd>E</kbd> 聊天，選「回去工作吧」結束</dd>
+      <dt>拍照</dt><dd><kbd>1</kbd>–<kbd>3</kbd> 換姿勢，<kbd>E</kbd> 倒數拍照，<kbd>Q</kbd> 結束；照片可長按或按右鍵另存</dd>
+      <dt>飯店 4F／5F</dt><dd>4F 電梯旁有自動販賣機（裝飾）；5F 是 VIP 大廳，總統套房的大門走近按 <kbd>E</kbd> 刷卡開門</dd>
+      <dt>畫質</dt><dd>「高畫質」含光暈與高解析陰影；「流暢」適合手機與內顯</dd>
+    </dl>
+    <p class="credits">素材：建築與場景以 Blender 程式產生；吉祥物奧蘿拉熊以 Tripo 產生；引擎 three.js、three-mesh-bvh（MIT）。</p>
+    <p>點任意處關閉。</p>
+  </div>
+</section>
+
+<div id="where" class="hud" aria-live="polite">
+  <span id="place-zh">入口廣場</span>
+  <span id="place-en">Entrance Plaza</span>
+</div>
+<div id="mapbox" class="hud">
+  <canvas id="minimap" aria-label="平面圖"></canvas>
+  <div class="north">N ↑</div>
+</div>
+<div id="bottom" class="hud">
+  <nav id="places" aria-label="瞬間移動"></nav>
+  <div class="tools">
+    <button id="btn-portal" class="tool portal" type="button">傳送門</button>
+    <button id="btn-chars" class="tool" type="button">角色</button>
+    <button id="btn-view" class="tool" type="button" aria-pressed="false" title="切換第一／第三人稱（V）">第一人稱</button>
+    <button id="btn-map" class="tool" type="button">地圖</button>
+    <button id="btn-fly" class="tool" type="button" aria-pressed="false">步行</button>
+    <button id="btn-quality" class="tool" type="button">高畫質</button>
+    <button id="btn-help" class="tool" type="button">說明</button>
+  </div>
+</div>
+
+<script>
+  // Startup diagnostics removed for public sharing; keep a no-op so other code can still call it.
+  window.__diag = function () {};
+  // Runs before the 3D module: reports progress even if the module never starts.
+  (function () {
+    var t = document.getElementById('load-text');
+    var ok = window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports('importmap');
+    if (!ok) { t.textContent = '這個瀏覽器版本太舊，無法執行 3D 場景（需要 iOS 16.4 / Android Chrome 89 以上）。'; window.__diag('no importmap support'); return; }
+    window.__diag('page parsed');
+    t.textContent = '載入程式…';
+    setTimeout(function () {
+      if (!window.__worldBoot) { t.textContent = '程式沒有啟動。請關閉後重新打開，或用 Safari / Chrome 開啟連結。'; window.__diag('module never started'); }
+    }, 20000);
+  })();
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./park/viewer/lib/three.module.min.js",
+    "three/addons/": "./park/viewer/lib/addons/",
+    "three-mesh-bvh": "./park/viewer/lib/three-mesh-bvh.module.js"
+  }
+}
+</script>
+<script>window.AURORA_ONLY = 'hotel'; window.AURORA_LITE = true;</script>
+<script type="module" src="./world/app.js"></script>
+<!-- END PAGE -->
+</body>
+</html>
