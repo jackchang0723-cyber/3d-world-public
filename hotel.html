@@ -93,8 +93,16 @@
     padding-left: var(--gut-l); padding-right: var(--gut-r);
     display: flex; gap: 10px; align-items: flex-end; justify-content: space-between; pointer-events: none;
   }
-  #places { display: flex; gap: 6px; overflow-x: auto; min-width: 0; scrollbar-width: none; pointer-events: auto; padding-bottom: 2px; }
-  #places::-webkit-scrollbar { display: none; }
+  /* 快速傳送 and 設定 open a panel above the bar */
+  .menu-panel {
+    position: fixed; z-index: 12; bottom: calc(max(12px, env(safe-area-inset-bottom, 0px)) + 46px);
+    width: min(330px, calc(100% - 32px)); max-height: calc(100% - 160px); overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--line); padding: 12px; display: grid; gap: 10px;
+  }
+  .menu-panel.left { left: var(--gut-l); }
+  .menu-panel.right { right: var(--gut-r); }
+  .menu-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .menu-grid .chip, .menu-grid .tool { width: 100%; padding: 10px 11px; font-size: 13px; text-align: left; }
   .chip {
     display: inline-flex; gap: 7px; align-items: center; white-space: nowrap; flex: none;
     background: var(--panel); border: 1px solid var(--line); border-radius: 2px; padding: 7px 11px 7px 8px;
@@ -119,6 +127,8 @@
   .seat kbd { display: inline-block; }
   @media (pointer: coarse) { .seat { top: auto; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); padding: 12px 22px; font-size: 16px; } .seat kbd { display: none; } }
   .seat.ride { border-color: var(--rose); }
+  .seat.talk { border-color: var(--rose); top: calc(50% + 96px); }
+  @media (pointer: coarse) { .seat.talk { top: auto; bottom: calc(205px + env(safe-area-inset-bottom, 0px)); } }
   .ride-hud {
     position: fixed; left: 50%; top: max(14px, env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 9;
     display: inline-flex; gap: 10px; align-items: center; padding: 8px 14px; white-space: nowrap;
@@ -272,8 +282,11 @@
     #minimap { width: 84px; height: 158px; }
     .tool { padding: 7px 7px; font-size: 12px; }
     .tools { gap: 5px; flex-wrap: wrap; }
-    #bottom { flex-direction: column-reverse; align-items: stretch; }
-    .tools { justify-content: flex-end; }
+    #bottom { flex-direction: column-reverse; align-items: stretch; gap: 6px; }
+    #bottom .tools:first-child { justify-content: flex-start; }
+    #bottom .tools:last-child { justify-content: flex-end; }
+    .menu-panel { bottom: calc(max(12px, env(safe-area-inset-bottom, 0px)) + 84px); }
+    #bottom .tool { padding: 9px 14px; font-size: 13px; }
   }
   @media (prefers-reduced-motion: reduce) { #load-bar { transition: none; } }
 </style>
@@ -337,6 +350,7 @@
 <div id="stick" hidden><span></span></div>
 <div id="ride-hud" class="ride-hud" hidden aria-live="polite"><b id="ride-name">旋轉木馬</b><span>搭乘中 · <span class="mouse-only">按 E 下車</span><span class="touch-only">點「下車」離開</span></span></div>
 <button id="seat-btn" class="seat" type="button" hidden><kbd class="mouse-only">E</kbd><span>坐下</span></button>
+<button id="talk-btn" class="seat talk" type="button" hidden><kbd class="mouse-only">T</kbd><span>聊天</span></button>
 
 <section id="loader" class="screen" aria-live="polite">
   <div class="load-col">
@@ -366,7 +380,7 @@
       <dt>左半邊拖曳</dt><dd>行走（推到底會快跑）</dd>
       <dt>右半邊拖曳</dt><dd>轉動視角</dd>
       <dt>對話 / 坐下 / 電梯</dt><dd>走到熊熊、椅子、電梯或門前，點畫面中間出現的按鈕</dd>
-      <dt>下方按鈕</dt><dd>瞬間移動、飛行模式、地圖</dd>
+      <dt>下方按鈕</dt><dd>傳送門、快速傳送（各區域）和設定（角色、地圖、飛行模式、畫質、說明）</dd>
     </dl>
     <button id="btn-enter" class="enter" type="button">開始探索</button>
   </div>
@@ -378,13 +392,14 @@
     <dl class="controls">
       <dt><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> / 方向鍵</dt><dd>行走，<kbd>Shift</kbd> 快跑，<kbd>Space</kbd> 跳躍</dd>
       <dt>滑鼠</dt><dd>點一下畫面鎖定滑鼠後轉動視角；無法鎖定時按住拖曳</dd>
-      <dt><kbd>E</kbd></dt><dd>和熊熊對話；坐下 / 起身；飯店電梯門前呼叫電梯（進電梯後按 <kbd>1</kbd>–<kbd>5</kbd> 選樓層）</dd>
+      <dt><kbd>E</kbd></dt><dd>和熊熊對話；坐下 / 起身；飯店電梯門前呼叫電梯（進電梯後按 <kbd>1</kbd>–<kbd>6</kbd> 選樓層）</dd>
       <dt><kbd>F</kbd></dt><dd>飛行模式，可穿牆；<kbd>E</kbd>/<kbd>Q</kbd> 升降</dd>
       <dt><kbd>1</kbd>–<kbd>0</kbd></dt><dd>瞬間移動</dd>
       <dt><kbd>M</kbd> / <kbd>H</kbd></dt><dd>地圖 / 說明</dd>
-      <dt>角色</dt><dd>走近角色按 <kbd>E</kbd> 對話，用數字鍵或點選選單：介紹、帶路（跟著走或直接過去）、拍照、擊掌、抱抱；抬頭看著熊熊的頭按 <kbd>E</kbd> 可以摸摸頭。右下角「角色」可以開啟或關閉每個角色</dd>
+      <dt>角色</dt><dd>走近角色按 <kbd>E</kbd> 對話，選單一律是「詢問」「互動」（擊掌、抱抱和各自的特別動作；米雅、米露只在陪伴時才有）「拍照」「陪我逛逛」「沒事，謝謝」：介紹、各種說明和「請帶我去…」（跟著走或直接過去）都在「詢問」裡，角色說完話、你點掉對話框後才會出發；帶路時可以按「關閉對話框」，想再看到就對她按 <kbd>E</kbd>；抬頭看著熊熊的頭按 <kbd>E</kbd> 可以摸摸頭。右下角「角色」可以開啟或關閉每個角色</dd>
       <dt>陪伴模式</dt><dd>對熊熊選「陪我逛逛 💞」，她就會一直跟著你，連搭電梯也一起；面向她按 <kbd>E</kbd> 聊天，選「回去工作吧」結束</dd>
       <dt>拍照</dt><dd><kbd>1</kbd>–<kbd>3</kbd> 換姿勢，<kbd>E</kbd> 倒數拍照，<kbd>Q</kbd> 結束；照片可長按或按右鍵另存</dd>
+      <dt>床</dt><dd>走到床邊、面向枕頭按 <kbd>E</kbd> 躺下，再按 <kbd>E</kbd> 起身</dd>
       <dt>飯店 4F／5F</dt><dd>4F 電梯旁有自動販賣機（裝飾）；5F 是 VIP 大廳，總統套房的大門走近按 <kbd>E</kbd> 刷卡開門</dd>
       <dt>畫質</dt><dd>「高畫質」含光暈與高解析陰影；「流暢」適合手機與內顯</dd>
     </dl>
@@ -402,9 +417,21 @@
   <div class="north">N ↑</div>
 </div>
 <div id="bottom" class="hud">
-  <nav id="places" aria-label="瞬間移動"></nav>
   <div class="tools">
     <button id="btn-portal" class="tool portal" type="button">傳送門</button>
+    <button id="btn-places" class="tool" type="button" aria-expanded="false" aria-controls="places-panel">快速傳送</button>
+  </div>
+  <div class="tools">
+    <button id="btn-settings" class="tool" type="button" aria-expanded="false" aria-controls="settings-panel">設定</button>
+  </div>
+</div>
+<section id="places-panel" class="menu-panel left" hidden aria-label="快速傳送">
+  <div class="lift-head">QUICK TRAVEL · 快速傳送</div>
+  <nav id="places" class="menu-grid" aria-label="瞬間移動"></nav>
+</section>
+<section id="settings-panel" class="menu-panel right" hidden aria-label="設定">
+  <div class="lift-head">SETTINGS · 設定</div>
+  <div class="menu-grid">
     <button id="btn-chars" class="tool" type="button">角色</button>
     <button id="btn-view" class="tool" type="button" aria-pressed="false" title="切換第一／第三人稱（V）">第一人稱</button>
     <button id="btn-map" class="tool" type="button">地圖</button>
@@ -412,7 +439,7 @@
     <button id="btn-quality" class="tool" type="button">高畫質</button>
     <button id="btn-help" class="tool" type="button">說明</button>
   </div>
-</div>
+</section>
 
 <script>
   // Startup diagnostics removed for public sharing; keep a no-op so other code can still call it.

@@ -263,6 +263,17 @@ function newDraco() {
   return d;
 }
 
+// Characters are Draco-compressed too (tools/compress_characters.py) and load after the
+// world's decoder is gone, so they have a loader of their own that stays ready.
+const charLoader = new GLTFLoader(manager);
+{
+  const d = new DRACOLoader(manager);
+  d.setDecoderPath('park/viewer/lib/draco/');
+  d.setDecoderConfig({ type: 'js' });
+  d.setWorkerLimit(1);
+  charLoader.setDRACOLoader(d);
+}
+
 async function fetchWithProgress(url, onBytes) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
@@ -727,38 +738,60 @@ function chooseFloor(fi) {
 const liftPanel = document.getElementById('lift-panel');
 const liftStatus = document.getElementById('lift-status');
 // ---------------------------------------------------------------------------
-// Doors that open (the 5F VIP lobby's double door).
+// Doors that open: the 5F VIP lobby's double door (keycard) and the 1F restroom stalls.
 // The door leaves are built here like the lift doors; press E to open (they swing
 // away from you) and they close again once you have walked off.
 // ---------------------------------------------------------------------------
 const doors = [];
 let doorCand = null;
+// A door in doors.json sits in a wall along x at y (x0..x1), or with axis 'y' in a wall
+// along y at x (y0..y1). Two leaves unless 'single' (hinged at x0 / y0); 'base' lifts
+// the leaves off the floor (stall doors), 'stay' keeps it as you left it instead of
+// closing after you walk off, 'ajar' (0..1) opens it that far at the start, towards
+// 'out' (+1 / -1 along +y for a wall along x, along +x for a wall along y).
 function buildDoors() {
   if (!DOORS_CFG) return;
   const wood = matByName.Walnut || new THREE.MeshStandardMaterial({ color: 0x5a3a24, roughness: 0.4 });
   const gold = matByName.BrushedGold || new THREE.MeshStandardMaterial({ color: 0xc9a45c, metalness: 1, roughness: 0.35 });
   for (const c of DOORS_CFG) {
-    const w = (c.x1 - c.x0) / 2;
-    const d = { c, k: 0, want: 0, dir: 1, away: 0, leaves: [], center: b2t((c.x0 + c.x1) / 2, c.y, c.z) };
-    for (const [hx, s] of [[c.x0, 1], [c.x1, -1]]) {        // hinge, and the way the leaf runs from it (+x / -x)
+    const alongY = c.axis === 'y';
+    const a0 = alongY ? c.y0 : c.x0, a1 = alongY ? c.y1 : c.x1;
+    const at = (t) => (alongY ? b2t(c.x, t, c.z) : b2t(t, c.y, c.z));
+    const base = c.base || 0, lh = c.h - base;
+    const w = (a1 - a0) / (c.single ? 1 : 2);
+    const k = c.ajar || 0;
+    const d = { c, k, want: k, dir: (alongY ? 1 : -1) * (c.out || 1), away: 0, leaves: [], alongY, center: at((a0 + a1) / 2) };
+    const ends = c.single ? [[a0, 1]] : [[a0, 1], [a1, -1]];
+    for (const [ha, s] of ends) {                           // hinge, and the way the leaf runs from it
+      const frame = new THREE.Group();                     // turns the leaf into a wall along y
+      frame.position.copy(at(ha));
+      frame.position.y += base;
+      if (alongY) frame.rotation.y = Math.PI / 2;
       const pivot = new THREE.Group();
-      pivot.position.copy(b2t(hx, c.y, c.z));
-      const leaf = new THREE.Mesh(new THREE.BoxGeometry(w - 0.01, c.h - 0.01, 0.06), wood);
-      leaf.position.set(s * w / 2, c.h / 2, 0);
+      const leaf = new THREE.Mesh(new THREE.BoxGeometry(w - 0.01, lh - 0.01, 0.06), wood);
+      leaf.position.set(s * w / 2, lh / 2, 0);
       leaf.receiveShadow = true;
-      for (const fz of [-1, 1]) {                          // a raised panel and a long brass pull on each face
-        const panel = new THREE.Mesh(new THREE.BoxGeometry(w - 0.24, c.h - 0.5, 0.012), wood);
+      for (const fz of [-1, 1]) {                          // a raised panel and a brass pull on each face
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(w - 0.24, lh - 0.5, 0.012), wood);
         panel.position.set(0, 0.05, fz * 0.034);
-        const pull = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.55, 0.025), gold);
-        pull.position.set(-s * (w / 2 - 0.1), -0.15, fz * 0.06);
+        const pull = new THREE.Mesh(new THREE.BoxGeometry(0.025, Math.min(0.55, lh * 0.25), 0.025), gold);
+        pull.position.set(s * (w / 2 - 0.1), -0.15, fz * 0.06);        // by the free edge, away from the hinge
         leaf.add(panel, pull);
       }
       pivot.add(leaf);
-      worldRoot.add(pivot);
+      frame.add(pivot);
+      worldRoot.add(frame);
       dynColliders.push(leaf);
       d.leaves.push({ pivot, s });
     }
     doors.push(d);
+    setDoorLeaves(d);
+  }
+}
+function setDoorLeaves(d) {
+  for (const L of d.leaves) {
+    L.pivot.rotation.y = -L.s * d.dir * ease(d.k) * 1.45;
+    L.pivot.updateMatrixWorld(true);
   }
 }
 const flatDist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -776,19 +809,18 @@ function findDoor() {
 function toggleDoor(d) {
   if (d.want) { d.want = 0; noise(0.5, 0.18, 180, 0.9, 0.7); return; }
   d.want = 1; d.away = 0;
-  d.dir = player.pos.z > d.center.z ? -1 : 1;              // swing away from whoever opens it
-  tone(1760, 0, 0.08, 'sine', 0.05); tone(2349, 0.09, 0.12, 'sine', 0.05);   // the keycard reader's beep
+  // swing away from whoever opens it (a leaf turns towards -y, or +x along y, for dir 1)
+  d.dir = d.alongY ? (player.pos.x > d.center.x ? -1 : 1) : (player.pos.z > d.center.z ? -1 : 1);
+  if (d.c.card) { tone(1760, 0, 0.08, 'sine', 0.05); tone(2349, 0.09, 0.12, 'sine', 0.05); }   // the keycard reader's beep
+  else noise(0.35, 0.12, 300, 0.9, 0.6);
 }
 function updateDoors(dt) {
   for (const d of doors) {
     const dist = flatDist(player.pos, d.center);
-    if (d.want && dist > 3.5) { if ((d.away += dt) > 2.5) toggleDoor(d); } else d.away = 0;   // closes after you walk off
-    if (!d.want && d.k > 0 && dist < 0.9 && Math.abs(player.pos.y - d.center.y) < 1.5) d.want = 1;   // never shut on you
-    d.k = THREE.MathUtils.clamp(d.k + (d.want ? dt : -dt) / 0.9, 0, 1);
-    for (const L of d.leaves) {
-      L.pivot.rotation.y = -L.s * d.dir * ease(d.k) * 1.45;
-      L.pivot.updateMatrixWorld(true);
-    }
+    if (d.want && !d.c.stay && dist > 3.5) { if ((d.away += dt) > 2.5) toggleDoor(d); } else d.away = 0;   // closes after you walk off
+    if (!d.want && d.k > 0 && dist < (d.c.single ? 0.45 : 0.9) && Math.abs(player.pos.y - d.center.y) < 1.5) d.want = 1;   // never shut on you
+    const k = THREE.MathUtils.clamp(d.k + Math.sign(d.want - d.k) * dt / 0.9, Math.min(d.k, d.want), Math.max(d.k, d.want));
+    if (k !== d.k) { d.k = k; setDoorLeaves(d); }
   }
 }
 function updateLift(dt) {
@@ -1192,10 +1224,13 @@ function updateRiding(dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Seats: walk up to a chair, sofa, stool, bench or lounger and press E to sit.
+// Seats: walk up to a chair, sofa, stool, bench or lounger and press E to sit; on a
+// bed (its seat is at the pillow, facing the foot) you lie down and look up.
 // ---------------------------------------------------------------------------
 let SEATS = [];
-const SEAT_EYE = { lounger: 0.48, stool: 0.7 };         // eye height above the seat (default 0.72)
+const SEAT_EYE = { lounger: 0.48, stool: 0.7, bed: 0.2 };   // eye height above the seat (default 0.72)
+const SEAT_PITCH = { lounger: 0.08, bed: 0.95 };            // where you look once seated (default -0.06)
+const RECLINED = new Set(['lounger', 'bed']);
 const sit = { seat: null, k: 0, dir: 0, standPos: new THREE.Vector3(), standEye: 0, yaw0: 0, pitch0: 0 };
 let candidate = null, liftCall = null, portalCand = false;
 const seatRing = new THREE.Mesh(
@@ -1323,13 +1358,6 @@ const CHARACTERS = [
           '走到門前按 E，就能去星光童話王國或 Aurora Galleria 購物中心，玩完再從那邊的傳送門回來就好！',
         ], portal: true,
       },
-      {
-        label: '一起玩 🎈', lines: '要一起做什麼呢？', sub: [
-          { label: '一起拍照 📸', photo: true },
-          { label: '擊掌 ✋', act: 'highfive', lines: ['耶～擊掌成功！✋ 你今天也很棒喔！'] },
-          { label: '抱抱 🤗', act: 'hug', lines: ['抱抱～ 謝謝你來 Grand Aurora，要玩得開心喔！💕'] },
-        ],
-      },
       { label: '再見 👋', bye: ['再見～祝你住得開心，有需要隨時來大廳找我喔！👋'] },
     ],
     pats: ['嘿嘿～好舒服 ♡', '熊熊的毛是不是很軟？', '再摸一下下嘛～ ♡', '被摸頭好開心！✨'],
@@ -1344,6 +1372,8 @@ const CHARACTERS = [
   ...[
     {
       id: 'staff_desk', zh: '米雅', role: '接待員 · 姊姊', p: [17.15, 13.0, 0.04], face: [0.0, 13.0],
+      // out from behind the desk (round its north end) to where the bear's routes start
+      guide: HOTEL_GUIDE, noGuide: ['reception'], lead: [[17.15, 19.3], [12.0, 19.6], [7.0, 19.6], [4.5, 9.5]],
       // up and down behind the desk, and a rest on one of the desk chairs (facing the counter)
       outings: [{ via: [[17.15, 9.6]] }, { via: [[17.15, 16.0]] }, { via: [[17.1, 14.95]], seat: [16.65, 14.3], h: 0.58, face: [10.0, 14.3] }],
       hello: '歡迎光臨 Grand Aurora，我是接待員米雅。請問需要什麼服務呢？',
@@ -1364,11 +1394,16 @@ const CHARACTERS = [
     },
     {
       id: 'staff_lobby', zh: '米露', role: '大廳服務員 · 妹妹', p: [7.0, 8.5, 0.04], face: [7.0, 16.0],
+      guide: HOTEL_GUIDE, lead: [[4.5, 8.5]],
       file: 'characters/staff_lulu/staff_lulu.gltf.json',   // her own red uniform
       patrol: [[7.0, 8.5], [7.0, 16.0], [-7.0, 16.0], [-7.0, 8.5]],
       hello: '您好，我是大廳服務員米露～有什麼可以為您服務的嗎？',
       menu: [
-        { label: '洗手間在哪', lines: ['洗手間在電梯廳旁邊，沿著大廳西側往北走就到了 🚻'] },
+        {
+          label: '洗手間在哪', lines: ['洗手間在電梯廳旁邊！沿著大廳西側往北走，最裡面那面牆上有兩扇門，左邊是男廁、右邊是女廁 🚻', '走到門前按 E 就能開門喔～'], trips: [
+            { label: '帶我過去', line: '到了！左邊是男廁、右邊是女廁 🚻', p: [-16.3, 27.6, 0.04], yaw: 0 },
+          ],
+        },
         {
           label: '推薦去哪裡', lines: ['推薦您到頂樓的空中酒吧看夜景，或是去室內泳池放鬆一下～'], trips: [
             { label: '去空中酒吧', line: '好的，祝您有個美好的夜晚 🍸', p: [-12.5, 24.2, 24.8], yaw: -Math.PI / 2 - 0.5 },
@@ -1526,7 +1561,7 @@ function nameSprite(c) {
 const charFiles = {};
 async function loadCharacter(c) {
   const buf = await (charFiles[c.file] ||= fetchWithProgress(c.file, () => { }));
-  const gltf = await loader.parseAsync(jsonToGlb(buf), c.file.slice(0, c.file.lastIndexOf('/') + 1));
+  const gltf = await charLoader.parseAsync(jsonToGlb(buf), c.file.slice(0, c.file.lastIndexOf('/') + 1));
   const model = gltf.scene;
   const box = new THREE.Box3().setFromObject(model);
   const s = c.height / Math.max(0.01, box.max.y - box.min.y);
@@ -1578,6 +1613,7 @@ async function loadCharacter(c) {
   if (c.patrol) { npc.mode = 'patrol'; npc.pi = 0; npc.pause = Math.random() * 3; }
   npc.sitK = 0; npc.sitWant = 0; npc.outingT = 12 + Math.random() * 12;
   if (bones.Hips) npc.hipH = root.worldToLocal(bones.Hips.getWorldPosition(new THREE.Vector3())).y;
+  if (bones.LeftUpLeg && bones.LeftLeg) npc.thighLen = bones.LeftUpLeg.getWorldPosition(new THREE.Vector3()).distanceTo(bones.LeftLeg.getWorldPosition(new THREE.Vector3()));
   dynColliders.push(pillar);
   npcs.push(npc);
   return npc;
@@ -1620,7 +1656,7 @@ const POSES = {
 };
 const PHOTO_POSES = ['peace', 'cheer', 'heart'];
 const ACTS = {
-  highfive: { dur: 1.7, R: [[0.35, 0.55, 0.8], [0.1, 0.95, 0.45]], at: 0.6 },
+  highfive: { dur: 1.7, R: [[0.35, 0.3, 0.88], [0.1, 0.8, 0.6]], at: 0.6 },
   hug: { dur: 2.6, at: 0.75 },
   pat: { dur: 2.2, L: [[0.45, -0.45, 0.6], [-0.55, 0.75, 0.45]], R: [[0.45, -0.45, 0.6], [-0.55, 0.75, 0.45]] },
   stretch: { dur: 2.8, L: [[0.2, 1, 0.05], [-0.15, 1, 0]], R: [[0.2, 1, 0.05], [-0.15, 1, 0]] },
@@ -1628,8 +1664,29 @@ const ACTS = {
   nod: { dur: 1.5 },
   bow: { dur: 2.0, L: [[0.2, -1, 0.3], [-0.45, -0.55, 0.7]], R: [[0.2, -1, 0.3], [-0.45, -0.55, 0.7]] },
   look: { dur: 3.2 },
+  spin: { dur: 1.4, L: [[0.9, 0.25, 0.2], [0.9, 0.3, 0.1]], R: [[0.9, 0.25, 0.2], [0.9, 0.3, 0.1]] },
+  yay: { dur: 1.8, R: [[0.35, 0.85, 0.35], [0.1, 1, 0.1]], at: 0.4 },
+  shake: { dur: 2.0, R: [[0.15, -0.45, 0.85], [0.05, -0.1, 1]], at: 0.5 },
 };
-const LAP_ARMS = [[0.25, -1, 0.35], [0.1, -0.45, 0.9]];   // seated: hands on the lap
+// 互動: every character can high-five and hug; each also has a few of her own.
+// The sisters only play while keeping you company (at work they stay formal).
+const PLAY = {
+  base: (who) => [
+    { label: '擊掌 ✋', act: 'highfive', lines: { bear: '耶～擊掌成功！✋ 你今天也很棒喔！', mia: '擊掌……這樣嗎？✋ 呵呵，有點不好意思呢。', milu: '耶～！✋ 再一次再一次！' }[who] },
+    { label: '抱抱 🤗', act: 'hug', lines: { bear: '抱抱～ 謝謝你來 Grand Aurora，要玩得開心喔！💕', mia: '……被抱住了。謝謝您，感覺很溫暖。', milu: '抱抱！嘿嘿，你是今天第一個抱我的人 💕' }[who] },
+  ],
+  bear: [{ label: '摸摸頭 🐻', pat: true }],
+  mia: [
+    { label: '握手 🤝', act: 'shake', lines: '請多指教。能陪您走這一趟，是我的榮幸。' },
+    { label: '鞠躬回禮 🙇', act: 'bow', lines: '承蒙照顧了。今後也請多多關照。' },
+  ],
+  milu: [
+    { label: '轉圈圈 💫', act: 'spin', lines: '看我轉～！好暈好暈……嘿嘿 💫' },
+  ],
+};
+const playItems = (n) => (n.c.person === 'bear' || n.follow ? [...PLAY.base(n.c.person), ...(PLAY[n.c.person] || [])] : [])
+  .filter((m) => !(sit.seat && (m.act === 'spin' || m.act === 'hug')));   // seated: no spinning or hugging
+const LAP_ARMS = [[0.12, -0.8, 0.55], [0.05, -0.55, 0.85]];   // seated: relaxed, hands resting on the knees
 const HUG_OPEN = [[0.95, 0.1, 0.55], [0.6, 0.1, 0.9]], HUG_CLOSE = [[0.45, 0.0, 1.0], [-0.9, 0.05, 0.5]];
 const lerp3 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 const lerpArm = (a, b, k) => [lerp3(a[0], b[0], k), lerp3(a[1], b[1], k)];
@@ -1637,6 +1694,10 @@ function poseArms(n, name, side) { return (name && POSES[name]?.[side]) || armsB
 function actArms(n, side) {
   const a = n.act, A = ACTS[a.type];
   if (a.type === 'hug') return lerpArm(HUG_OPEN, HUG_CLOSE, ease(THREE.MathUtils.clamp((a.t - 0.45) / 0.35, 0, 1)));
+  if (a.type === 'shake' && A[side]) {    // shaking hands: the forearm bobs up and down
+    const w = Math.sin(a.t * 12) * 0.15 * Math.min(1, a.t * 2);
+    return [A[side][0], [A[side][1][0], A[side][1][1] + w, A[side][1][2]]];
+  }
   if (a.type === 'tidy' && A[side]) {   // smoothing the skirt: the paws brush sideways
     const w = Math.sin(a.t * 7) * 0.25;
     return [A[side][0], [A[side][1][0] + w, A[side][1][1], A[side][1][2]]];
@@ -1660,6 +1721,12 @@ function updateOuting(n, dt) {
       O.from = b2t(ax, ay, z); O.to = b2t(o.seat[0], o.seat[1], z);
       const f = o.face ? b2t(o.face[0], o.face[1], z) : O.from;
       n.sitYaw = Math.atan2(f.x - O.to.x, f.z - O.to.z);
+      const fx = Math.sin(n.sitYaw), fz = Math.cos(n.sitYaw);
+      const sh = kneeShift(cushionEdge(new THREE.Vector3(O.to.x, z + o.h, O.to.z), fx, fz), n.thighLen || 0.4);
+      O.to.x += fx * sh; O.to.z += fz * sh;
+      // the ground right there (a bench on a raised pavement sits a little higher than where you stood)
+      const g = castHit(new THREE.Vector3(O.to.x, z + 0.3, O.to.z), _down, 0.5);
+      if (g && Math.abs(g.point.y - z) < 0.2) n.post.y = g.point.y;
       n.sitH = o.h; n.sitWant = 1;
       O.phase = 'sit'; O.t = 12 + Math.random() * 10;
     } else { O.phase = 'look'; O.t = 2.5 + Math.random() * 2.5; doAct(n, 'look'); }
@@ -1672,7 +1739,7 @@ function updateOuting(n, dt) {
   } else if (O.phase === 'stand') {
     n.root.position.x = O.from.x + (O.to.x - O.from.x) * ease(n.sitK);
     n.root.position.z = O.from.z + (O.to.z - O.from.z) * ease(n.sitK);
-    if (n.sitK <= 0) O.phase = 'back';
+    if (n.sitK <= 0) { O.phase = 'back'; n.post.y = z; }
   } else if (O.phase === 'look' && (O.t -= dt) <= 0) O.phase = 'back';
   if (O.phase === 'back' && n.follow) { n.outing = null; n.mode = 'follow'; n.post.copy(n.root.position); return; }
   if (O.phase === 'back' && !O.home) {
@@ -1692,21 +1759,24 @@ const COMPANION = {
     bye: '那我先回去囉，今天好開心！有需要再來找我 👋', where: '這裡是{place}喔！我們一起逛逛吧～',
     chat: [['你知道嗎？我最喜歡飯店的空中酒吧，晚上的星星超漂亮 ✨'], ['走路的時候我會偷偷數步數……剛剛數到 128 步！🐾'],
       ['米雅和米露是一對姊妹，我們三個常常一起吃午餐喔～'], ['如果你累了，我們找張椅子坐坐，我陪你一起坐 💺']],
-    remarks: ['{place}到了～ 好期待！', '哇，是{place}！我好喜歡這裡 ✨', '{place}耶！要不要在這裡拍張照？📸', '嘿嘿，跟你一起來{place}好開心 💕'],
+    thoughts: ['（今天走了好多路，腳腳有點痠……但是好開心 🐾）', '（{place}好像有甜甜的味道……是不是有人在烤蛋糕？）', '（不知道米雅和米露現在在做什麼呢～）',
+      '（跟你一起散步，比一個人站在大廳好多了 💕）', '（等一下要不要撒嬌討個抱抱呢……）', '（剛剛那個轉角，好像看到一隻很可愛的小鳥）'],
   },
   mia: {
     start: '好的，櫃檯先交給同事，今天由我陪您走走 😊', hello: '請問接下來想去哪裡呢？我陪您一起。', again: '還有什麼想聊的嗎？',
     bye: '那我回崗位了，謝謝您的陪伴，祝您有美好的一天。', where: '這裡是{place}。需要的話，我可以幫您介紹附近的設施。',
     chat: [['其實我很少離開櫃檯，能這樣走走覺得好新鮮。'], ['米露常說我太認真了……您覺得呢？'],
       ['我最喜歡空中酒吧的夜景，下班後常常和米露一起去看。'], ['偷偷告訴您，奧蘿拉熊其實很怕打雷喔。']],
-    remarks: ['這裡是{place}，請小心腳步。', '{place}到了，要在這裡休息一下嗎？', '{place}……米露一定會很喜歡這裡。'],
+    thoughts: ['（櫃檯現在不知道忙不忙……米露應該應付得來吧。）', '（{place}的燈光很柔和，下次可以推薦給客人。）', '（能這樣慢慢走，好像在放假一樣。）',
+      '（領巾有沒有歪掉呢……）', '（客人看起來很開心，太好了。）', '（今天的晚霞應該會很漂亮。）'],
   },
   milu: {
     start: '耶！可以偷懶……我是說，陪你逛逛 ✨ 出發！', hello: '下一站去哪裡？我跟著你喔～', again: '還要聊什麼呢？',
     bye: '好吧……那我回去工作了，下次再一起玩！掰掰～', where: '這裡是{place}！我超熟的，問我準沒錯 😎',
     chat: [['你知道嗎？姊姊在櫃檯常常偷看我巡邏 👀'], ['我最喜歡購物中心的玩具店，每次經過都想進去！'],
       ['走累了要說喔，找張椅子坐下，我陪你一起坐～'], ['奧蘿拉熊抱起來超級軟的，你抱過了嗎？🧸']],
-    remarks: ['{place}！衝呀～', '哇，{place}耶！', '欸欸，{place}有什麼好玩的？', '{place}～ 我們來對地方了！'],
+    thoughts: ['（嘿嘿，偷懶成功 ✌️ 姊姊應該沒發現吧？）', '（{place}好像很好玩，下次休假再來！）', '（肚子有點餓了……等一下去吃點心好了。）',
+      '（要是能一直這樣逛下去就好了～）', '（剛剛那家店的櫥窗好可愛！）', '（走路的時候哼歌，會不會被聽到啊……）'],
   },
 };
 for (const c of CHARACTERS) { c.person = PERSON_OF[c.id] || c.id; c.with = COMPANION[c.person]; }
@@ -1715,7 +1785,10 @@ if (SOLO) {
   const elsewhere = LITE ? /傳送門|購物中心|童話王國|Galleria|米雅|米露/ : /傳送門|購物中心|童話王國|Galleria/;
   for (let i = CHARACTERS.length - 1; i >= 0; i--) if (!WORLDS[CHARACTERS[i].world] || (LITE && CHARACTERS[i].id !== 'bear')) CHARACTERS.splice(i, 1);
   for (const c of CHARACTERS) if (c.menu) c.menu = c.menu.filter((m) => !m.portal);
-  for (const t of Object.values(COMPANION)) if (t.chat) t.chat = t.chat.filter((l) => !elsewhere.test(l.join('')));
+  for (const t of Object.values(COMPANION)) {
+    if (t.chat) t.chat = t.chat.filter((l) => !elsewhere.test(l.join('')));
+    if (t.thoughts) t.thoughts = t.thoughts.filter((l) => !elsewhere.test(l));
+  }
 }
 let companion = null;                   // id of the character walking with the visitor
 try { companion = localStorage.getItem('aurora-world-companion'); } catch { }
@@ -1723,7 +1796,7 @@ if (!CHARACTERS.some((c) => c.id === companion && c.with)) companion = null;
 const saveCompanion = () => { try { if (companion) localStorage.setItem('aurora-world-companion', companion); else localStorage.removeItem('aurora-world-companion'); } catch { } };
 const companionChar = () => CHARACTERS.find((c) => c.id === companion) || null;
 const steps = [];                       // where the visitor walked, for the companion to follow
-let stepsWorld = null, lastPlaceTalk = '', placeTalkT = 0;
+let stepsWorld = null, thinkT = 30;
 const isFollower = (n) => !!n.follow;
 
 function makeFollower(n) {
@@ -1761,9 +1834,8 @@ function startCompanion(n) {
   saveCompanion();
   endOuting(n);
   makeFollower(n);
-  steps.length = 0;
+  steps.length = 0; stepsWorld = W.key;
   burst(headPos(n, 1.0), 'heart', 6, 0.5);
-  say(n, n.c.with.start, null, () => mainMenu(n));
 }
 function dismissCompanion(n, quiet = false) {
   companion = null;
@@ -1779,12 +1851,25 @@ function dismissCompanion(n, quiet = false) {
 // you sat down: take a free seat close to yours (reusing the outing's way of sitting).
 // The floor is the one you stood on, measured from below table height, so chairs tucked
 // under a table count too; she can come at a seat from the front or either side.
+// She gets there along your footsteps to where you stood before sitting down, and only
+// takes a seat whose front she can reach from there in a straight line; else she stands.
+const SHARE_R = 1.9;            // a seat this close to yours is at the same sofa, table or bench
 function sitNear(n) {
-  const floor = sit.standPos.y, mine = sit.seat.pos;
+  const floor = sit.standPos.y, mine = sit.seat.pos, from = sit.standPos;
+  const clearWay = (a, b) => {
+    const to = new THREE.Vector3(b.x - a.x, 0, b.z - a.z), len = to.length();
+    if (len < 0.05) return true;
+    to.normalize();
+    return [0.35, 1.0].every((h) => !castHit(new THREE.Vector3(a.x, floor + h, a.z), to, len + RADIUS));
+  };
+  // the same table or sofa: the spots in front of the two seats are no further apart
+  // than the seats themselves (back to back at neighbouring tables, they drift apart)
+  const front = (st, d) => new THREE.Vector3(st.pos.x - Math.sin(st.yaw) * d, 0, st.pos.z - Math.cos(st.yaw) * d);
+  const together = (st) => front(st, 0.6).distanceTo(front(sit.seat, 0.6)) <= Math.hypot(st.pos.x - mine.x, st.pos.z - mine.z) + 0.05;
   const cands = SEATS.filter((st) => {
-    if (st === sit.seat) return false;
+    if (st === sit.seat || !together(st)) return false;
     const d = st.pos.distanceTo(mine), h = st.pos.y - floor;
-    return d >= 0.45 && d < 6 && h > 0.2 && h < 1.0;
+    return st.kind !== 'bed' && d >= 0.45 && d < SHARE_R && h > 0.2 && h < 1.0;
   }).sort((a, b) => a.pos.distanceTo(mine) - b.pos.distanceTo(mine)).slice(0, 12);
   for (const st of cands) {
     const th = st.yaw + Math.PI, fx = Math.sin(th), fz = Math.cos(th);     // the way someone sitting there faces
@@ -1798,33 +1883,132 @@ function sitNear(n) {
       const hit = castHit(new THREE.Vector3(p.x, floor + 0.25, p.z), to.normalize(), len);
       // something in the way of sitting down (the seat's own frame, close to it, does not count)
       if (hit && Math.hypot(hit.point.x - st.pos.x, hit.point.z - st.pos.z) > 0.9) continue;
+      // straight there, or round the furniture by one turning point (a coffee table, say)
+      const via = clearWay(from, p) ? [] : findPath(from.clone().setY(floor), p)?.slice(0, -1);
+      if (!via) continue;
       n.mode = 'outing';
       n.outing = {
         o: { via: [[p.x, -p.z]], seat: [st.pos.x, -st.pos.z], h: st.pos.y - floor, z: floor, face: [st.pos.x + fx * 2, -(st.pos.z + fz * 2)] },
         phase: 'go', t: 0,
       };
-      n.path = [{ v: p, push: false }];
+      const way = steps.splice(0).map((v) => ({ v, push: false }));      // your footsteps, up to the seat
+      n.path = [...way, ...[from.clone().setY(floor), ...via, p].map((v) => ({ v, push: false }))];
       n.post.y = floor;
       return true;
     }
   }
   return false;
 }
+// ---- finding a way round furniture -------------------------------------------------------
+// A grid of 0.3 m cells around the two spots (up to 9 m beyond them): a cell is floor when
+// looking down from 1.7 m up meets the floor there (not a table, a counter or a wall top),
+// and a step to a neighbour must not run into anything at knee height. Cells next to an
+// obstacle are avoided so she does not brush along it. A* over that, then the corners are
+// pulled straight wherever the way is clear.
+const PATH_CELL = 0.3;
+function findPath(a, b) {
+  const y = a.y, pad = 6;
+  const x0 = Math.min(a.x, b.x) - pad, z0 = Math.min(a.z, b.z) - pad;
+  const nx = Math.min(90, Math.ceil((Math.abs(a.x - b.x) + 2 * pad) / PATH_CELL) + 1);
+  const nz = Math.min(90, Math.ceil((Math.abs(a.z - b.z) + 2 * pad) / PATH_CELL) + 1);
+  const at = (i, j) => new THREE.Vector3(x0 + i * PATH_CELL, y, z0 + j * PATH_CELL);
+  const cell = (v) => [Math.round((v.x - x0) / PATH_CELL), Math.round((v.z - z0) / PATH_CELL)];
+  const floorAt = new Map(), down = new THREE.Vector3(0, -1, 0), side = new THREE.Vector3();
+  const isFloor = (i, j) => {
+    if (i < 0 || j < 0 || i >= nx || j >= nz) return false;
+    const k = i * nz + j;
+    if (!floorAt.has(k)) {
+      const p = at(i, j);
+      ray.set(_eo.set(p.x, y + 1.7, p.z), down); ray.far = 2.1;     // from above counter height
+      const h = ray.intersectObject(collider, false)[0];
+      floorAt.set(k, !!h && h.point.y < y + 0.3 && h.point.y > y - 0.3);
+    }
+    return floorAt.get(k);
+  };
+  const open = (i, j) => isFloor(i, j) && isFloor(i + 1, j) && isFloor(i - 1, j) && isFloor(i, j + 1) && isFloor(i, j - 1);
+  const edges = new Map();
+  const edgeClear = (i, j, axis) => {            // from (i, j) one cell along +x (axis 0) or +z (axis 1)
+    const k = (i * nz + j) * 2 + axis;
+    if (!edges.has(k)) {
+      const p = at(i, j); side.set(axis ? 0 : 1, 0, axis ? 1 : 0);
+      ray.set(_eo.set(p.x, y + 0.4, p.z), side); ray.far = PATH_CELL + 0.1;
+      edges.set(k, !ray.intersectObject(collider, false)[0]);
+    }
+    return edges.get(k);
+  };
+  const card = (i, j, di, dj) => (di ? edgeClear(Math.min(i, i + di), j, 0) : edgeClear(i, Math.min(j, j + dj), 1));
+  // diagonal steps only where both ways round the corner are clear
+  const stepClear = (i, j, di, dj) => (!di || !dj ? card(i, j, di, dj)
+    : card(i, j, di, 0) && card(i + di, j, 0, dj) && card(i, j, 0, dj) && card(i, j + dj, di, 0));
+  const [si, sj] = cell(a), [gi, gj] = cell(b);
+  const key = (i, j) => i * nz + j, H = (i, j) => Math.hypot(i - gi, j - gj);
+  const g = new Map([[key(si, sj), 0]]), from = new Map(), heap = [], done = new Set();
+  const push = (e) => { heap.push(e); for (let c = heap.length - 1; c > 0;) { const p2 = (c - 1) >> 1; if (heap[p2][0] <= heap[c][0]) break; [heap[p2], heap[c]] = [heap[c], heap[p2]]; c = p2; } };
+  const pop = () => {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) {
+      heap[0] = last;
+      for (let c = 0; ;) { const l = 2 * c + 1, r = l + 1; let m = c; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === c) break; [heap[m], heap[c]] = [heap[c], heap[m]]; c = m; }
+    }
+    return top;
+  };
+  push([H(si, sj), si, sj]);
+  let found = false, n = 0;
+  while (heap.length && n++ < 4000) {
+    const [, i, j] = pop();
+    const k = key(i, j);
+    if (done.has(k)) continue;
+    done.add(k);
+    if (Math.abs(i - gi) <= 1 && Math.abs(j - gj) <= 1) { from.set(key(gi, gj), k); found = true; break; }
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const ii = i + di, jj = j + dj, kk = key(ii, jj);
+      if (done.has(kk)) continue;
+      // the start and the goal may sit right by furniture; everything between keeps clear of it
+      const near = Math.hypot(ii - si, jj - sj) < 2 || Math.hypot(ii - gi, jj - gj) < 2;
+      if (!(near ? isFloor(ii, jj) : open(ii, jj)) || !stepClear(i, j, di, dj)) continue;
+      const ng = g.get(k) + Math.hypot(di, dj);
+      if (ng < (g.get(kk) ?? Infinity)) { g.set(kk, ng); from.set(kk, k); push([ng + H(ii, jj), ii, jj]); }
+    }
+  }
+  if (!found) return null;
+  const pts = [];
+  for (let k = key(gi, gj); k !== undefined && k !== key(si, sj); k = from.get(k)) pts.push(at(Math.floor(k / nz), k % nz));
+  pts.reverse();
+  pts[pts.length - 1] = b.clone().setY(y);
+  // pull the corners straight
+  const out = []; let cur = a;
+  for (let q = 0; q < pts.length;) {
+    let far = q;
+    while (far + 1 < pts.length && !blockedWide(cur, pts[far + 1])) far++;
+    out.push(pts[far]); cur = pts[far]; q = far + 1;
+  }
+  return out;
+}
+// the same, for a body 0.5 m wide
+function blockedWide(a, b) {
+  const sx = -(b.z - a.z), sz = b.x - a.x, l = Math.hypot(sx, sz) || 1, o = 0.25 / l;
+  return [-1, 0, 1].some((k) => blockedBetween(new THREE.Vector3(a.x + sx * o * k, a.y, a.z + sz * o * k), new THREE.Vector3(b.x + sx * o * k, b.y, b.z + sz * o * k)));
+}
+// is there furniture (a counter, say) between two spots on the same floor?
+function blockedBetween(a, b) {
+  const d = new THREE.Vector3(b.x - a.x, 0, b.z - a.z), len = d.length();
+  if (len < 0.05) return false;
+  d.normalize();
+  return [0.5, 1.0].some((h) => { const hit = castHit(new THREE.Vector3(a.x, a.y + h, a.z), d, len); return hit && hit.distance < len - 0.35 && !npcs.some((m) => m.pillar === hit.object); });
+}
 function updateCompanion(n, dt, dist) {
+  // now and then, a thought of her own (not a tour guide's announcement)
+  thinkT -= dt;
+  if (thinkT <= 0 && !dialog.npc && !photo.npc && !portalCand && !riding.ride && dist < 8) {
+    const t = pick(n.c.with.thoughts);
+    toast(`💭 ${n.c.zh}：${t.includes('{place}') ? t.replace('{place}', locate()[0]) : t}`);
+    thinkT = 45 + Math.random() * 45;
+  }
   if (n.mode === 'outing') {                  // sitting with you: stand up when you do
     if (n.outing.phase === 'sit') n.outing.t = sit.seat ? 99 : 0;
     return;
   }
   n.greeted = true;
-  // something to say about each new place
-  placeTalkT -= dt;
-  if (!dialog.npc && !portalCand && !riding.ride && dist < 8) {
-    const place = locate()[0];
-    if (place !== lastPlaceTalk) {
-      if (lastPlaceTalk && placeTalkT <= 0) { toast(`${n.c.zh}：${pick(n.c.with.remarks).replace('{place}', place)}`); placeTalkT = 12; }
-      lastPlaceTalk = place;
-    }
-  }
   if (dialog.npc === n || photo.npc === n || riding.ride || player.fly || (lift.car && inCar())) { n.path = []; return; }
   const dy = player.pos.y - n.root.position.y;
   if (n.jump || dist > 20 || Math.abs(dy) > 2.5) { n.jump = false; placeBeside(n); return; }
@@ -1832,15 +2016,27 @@ function updateCompanion(n, dt, dist) {
   if (sit.seat && sit.dir > 0 && sit.k >= 1 && dist < 8 && !n.sitTried) {
     n.sitTried = true;                         // look once per sit, not every frame
     if (sitNear(n)) return;
-    toast(`${n.c.zh}：這附近沒有空位，我站在旁邊陪你～`);
+    // a seat for one (a lobby bench, an armchair): she just waits beside you
+    if (SEATS.some((st) => st !== sit.seat && st.kind !== 'bed' && st.pos.distanceTo(sit.seat.pos) < SHARE_R)) toast(`${n.c.zh}：位子有點擠，我站在旁邊陪你～`);
   }
   while (steps.length && Math.hypot(steps[0].x - n.root.position.x, steps[0].z - n.root.position.z) < 0.45) steps.shift();
-  if (dist < 1.9) { n.path = []; return; }
   const t = steps[0] || player.pos;
+  if (dist < 1.9 && !blockedBetween(n.root.position, player.pos)) { n.path = []; n.detour = null; return; }   // beside you (not across a counter)
   const h = Math.hypot(t.x - n.root.position.x, t.z - n.root.position.z), v = Math.abs(t.y - n.root.position.y);
   if (v > 0.6 && h < v * 1.2) { placeBeside(n); return; }      // a drop or a lift on the trail: catch up instead
-  n.path = steps.length ? steps.slice(0, 8).map((p) => ({ v: p, push: false })) : [{ v: player.pos, push: false }];
   n.followSpeed = dist > 6 ? 4.2 : dist > 3.5 ? 2.8 : 1.5;
+  // something in the way (a counter, a table): find her own way round it
+  if (blockedWide(n.root.position, t)) {
+    n.detourT = (n.detourT || 0) - dt;
+    if ((!n.detour?.length || n.detourTo.distanceTo(t) > 2.5) && n.detourT <= 0) {   // a plan costs a few ms: not every frame
+      n.detour = findPath(n.root.position, t) || []; n.detourTo = t.clone(); n.detourT = 1.0;
+    }
+    n.detour ||= [];
+    while (n.detour.length > 1 && Math.hypot(n.detour[0].x - n.root.position.x, n.detour[0].z - n.root.position.z) < 0.3) n.detour.shift();
+    if (n.detour.length) { n.path = n.detour.map((v) => ({ v, push: false })); return; }
+  }
+  n.detour = null;
+  n.path = steps.length ? steps.slice(0, 8).map((p) => ({ v: p, push: false })) : [{ v: player.pos, push: false }];
 }
 function recordSteps() {
   if (!companion || !W) return;
@@ -1988,7 +2184,8 @@ function homePath(n) {
 }
 function goHome(n) {
   n.path = homePath(n);
-  n.mode = n.path.length ? 'home' : 'post';
+  n.mode = n.path.length ? 'home' : n.c.patrol ? 'patrol' : 'post';
+  n.pause = 2;
   n.intro = false;
 }
 function walkNpc(n, dt, dist) {
@@ -2024,23 +2221,38 @@ function walkNpc(n, dt, dist) {
   if (!n.path.length && n.mode !== 'follow') {
     n.speed = 0;
     if (n.mode === 'guide') { n.mode = 'arrived'; n.intro = true; }
-    else if (n.mode !== 'patrol' && n.mode !== 'outing') n.mode = 'post';
+    else if (n.mode !== 'patrol' && n.mode !== 'outing') { n.mode = n.c.patrol ? 'patrol' : 'post'; n.pause = 2; }   // back on her round
     else { n.pause = 2 + Math.random() * 4; n.yawStop = n.walkYaw; }
   }
 }
+// While guiding, a small box keeps you posted; '關閉對話框' hides it until you arrive
+// (talk to the guide to bring it back).
 function guideSay(n, text) {
-  if (n.msg === text && dialog.npc === n) return;
+  if (n.quiet || n.msg === text) return;     // only when there is news: fell behind, caught up, arrived
+  if ((dialog.npc && dialog.npc !== n) || photo.npc) return;        // busy with someone else: tell later
   n.msg = text;
-  say(n, text, [{ label: '不用帶路了', go: () => { n.mode = 'post'; closeDialog(); goHome(n); } }], null, true);
+  say(n, text, [
+    { label: '關閉對話框', go: () => { n.quiet = true; closeDialog(); } },
+    { label: '不用帶路了', go: () => { n.mode = 'post'; n.quiet = false; closeDialog(); goHome(n); } }], null, true);
 }
 function startGuide(n, k) {
-  const g = n.c.guide[k], z = n.c.p[2];
-  // mid-outing: retrace the outing's own path (round the furniture) before heading out
-  const back = n.outing ? [...n.outing.o.via].reverse().map(([x, y]) => ({ v: b2t(x, y, z), push: false })) : [];
-  n.path = back.concat(homePath(n), g.route.map(([x, y]) => ({ v: b2t(x, y, z), push: true })));
-  n.mode = 'guide'; n.dest = k; n.msg = ''; n.act = null;
+  const g = n.c.guide[k], z = n.c.p[2], lead = n.c.lead || [];
+  const step = ([x, y]) => ({ v: b2t(x, y, z), push: true });
+  if (n.mode === 'arrived' && n.trail.length > (n.leadN || 0)) {
+    // straight on from the last stop: back along that route only to where it left the
+    // lobby, then the new route (her trail keeps the lead-in, to find her post later)
+    const back = n.trail.splice(n.leadN || 0).reverse().map((v) => ({ v, push: false }));
+    n.path = back.concat(g.route.map(step));
+  } else {
+    // mid-outing: retrace the outing's own path (round the furniture) before heading out
+    const back = n.outing ? [...n.outing.o.via].reverse().map(([x, y]) => ({ v: b2t(x, y, z), push: false })) : [];
+    const home = n.mode === 'home' ? n.path.map((p) => ({ v: p.v, push: false })) : homePath(n);   // already on her way back
+    n.path = back.concat(home, [...lead, ...g.route].map(step));
+    n.leadN = lead.length;
+  }
+  n.mode = 'guide'; n.dest = k; n.act = null; n.quiet = false;
   n.outing = null; n.sitWant = 0;
-  guideSay(n, '這邊請，跟我來～ 🐾');
+  n.msg = '這邊請，跟我來～ 🐾';         // said before setting off, so no box until there is news
 }
 let fading = false;             // E does nothing while a trip fades out and in
 function fadeOut() {
@@ -2066,7 +2278,8 @@ async function directTrip(n, k) {
   const dl = Math.hypot(ex - qx, ey - qy) || 1;
   const sx = ex - (ex - qx) / dl * 2.4, sy = ey - (ey - qy) / dl * 2.4;
   n.root.position.copy(b2t(ex, ey, n.c.p[2]));
-  n.trail = r.map(([x, y]) => b2t(x, y, n.c.p[2]));
+  n.trail = [...(n.c.lead || []), ...r].map(([x, y]) => b2t(x, y, n.c.p[2]));   // the way back to her post
+  n.leadN = (n.c.lead || []).length;
   endOuting(n);
   n.path = []; n.speed = 0; n.mode = 'arrived'; n.intro = true; n.dest = k;
   n.yaw = n.root.rotation.y = Math.atan2(sx - ex, -(sy - ey));
@@ -2283,10 +2496,10 @@ function updateNpcs(dt) {
       else if (dist < 4.5) guideSay(n, '這邊請，跟我來～ 🐾');
     } else if (n.mode === 'arrived' && n.intro) {
       if (dist < 3.8) {
-        n.intro = false;
+        n.intro = false; n.quiet = false;
         const g = n.c.guide[n.dest];
         dialog.turn = 0.9;
-        say(n, g.intro, [{ label: '謝謝熊熊！', go: () => { n.wave = 2.6; say(n, '不客氣～有需要再來大廳找我喔！', null, closeDialog); } }, { label: '再帶我去別的地方', go: () => runTopic(n, { guide: true }) }]);
+        say(n, g.intro, [{ label: `謝謝${n.c.zh}！`, go: () => { n.wave = 2.6; say(n, '不客氣～有需要再來大廳找我喔！', null, closeDialog); } }, { label: '再帶我去別的地方', go: () => runTopic(n, { guide: true }) }]);
       } else if (dist > 35) { if (dialog.npc === n) closeDialog(); else goHome(n); }
       else guideSay(n, '到囉～ 快過來這邊！');
     }
@@ -2297,7 +2510,7 @@ function updateNpcs(dt) {
     else if (talking || photo.npc === n || !['post', 'patrol', 'outing'].includes(n.mode) || n.act?.type === 'pat' || (n.act?.type === 'bow' && dist < 6)) wantYaw = toYaw;
     else if (n.mode === 'outing') wantYaw = n.yaw;
     n.yaw += wrapAngle(wantYaw - n.yaw) * (1 - Math.exp(-dt * (n.speed > 0.15 ? 5 : 3)));
-    n.root.rotation.y = n.yaw;
+    n.root.rotation.y = n.yaw + (n.act?.type === 'spin' ? ease(Math.min(1, n.act.t / ACTS.spin.dur)) * Math.PI * 2 : 0);
     // greet once each time the visitor walks up to her post
     const standing = n.mode === 'post' || ((n.mode === 'patrol' || n.mode === 'follow') && n.speed < 0.1);
     if (standing && dist < 4.5 && !n.greeted && started && !n.act && !dialog.npc) { n.greeted = true; greet(n); }
@@ -2316,6 +2529,8 @@ function updateNpcs(dt) {
         a.fired = true; sfx.clap(); popEmoji('✋');
         burst(B.RightHand ? B.RightHand.getWorldPosition(new THREE.Vector3()) : headPos(n, 0.8), 'star', 10, 0.4);
       }
+      if (a.type === 'yay' && !a.fired && a.t > ACTS.yay.at) { a.fired = true; popEmoji('✌️'); sfx.pop(); burst(headPos(n, 1.05), 'star', 8, 0.4); }
+      if (a.type === 'shake' && !a.fired && a.t > ACTS.shake.at) { a.fired = true; popEmoji('🤝'); }
       if (a.type === 'hug' && !a.fired && a.t > ACTS.hug.at) {
         a.fired = true; sfx.hug(); popEmoji('💕'); flash('love');
         burst(headPos(n, 0.7).add(_vb.set(dx, 0, dz).normalize().multiplyScalar(0.5)), 'heart', 12, 0.8);
@@ -2324,7 +2539,12 @@ function updateNpcs(dt) {
     }
     n.poseK = Math.min(1, n.poseK + dt / 0.35);
     if (n.pose === 'heart' && (n.heartT -= dt) <= 0) { n.heartT = 0.45; burst(headPos(n, 1.08), 'heart', 1, 0.3); }
-    n.look += ((dist < 7 ? 1 : 0) - n.look) * (1 - Math.exp(-dt * 4));
+    let lookWant = dist < 7 ? 1 : 0;
+    if (n.sitK > 0.5 && !talking) {          // seated: mostly ahead, now and then a glance at you
+      if ((n.glanceT = (n.glanceT ?? 2) - dt) <= 0) { n.glancing = !n.glancing; n.glanceT = n.glancing ? 2 + Math.random() * 1.5 : 4 + Math.random() * 5; }
+      if (!n.glancing) lookWant = 0;
+    }
+    n.look += (lookWant - n.look) * (1 - Math.exp(-dt * 3));
     // start from the arms-down pose every frame, then layer the motions on top
     for (const [k, b] of Object.entries(B)) b.quaternion.copy(n.base[k]);
     n.root.updateMatrixWorld(true);
@@ -2348,15 +2568,17 @@ function updateNpcs(dt) {
     if (n.act && B.Spine) {
       const t = n.act.t;
       if (n.act.type === 'stretch') turnBone(B.Spine, _qc.setFromAxisAngle(side, -0.16 * ak));
-      if (n.act.type === 'hug') turnBone(B.Spine, _qc.setFromAxisAngle(side, 0.14 * ak));
-      if (n.act.type === 'tidy') turnBone(B.Spine, _qc.setFromAxisAngle(side, 0.12 * ak));
-      if (n.act.type === 'bow') { turnBone(B.Spine, _qc.setFromAxisAngle(side, 0.22 * ak)); if (B.Spine1) turnBone(B.Spine1, _qc.setFromAxisAngle(side, 0.18 * ak)); }
+      // (a positive turn about 'side' tips the upper body back, so leaning in is negative)
+      if (n.act.type === 'hug') turnBone(B.Spine, _qc.setFromAxisAngle(side, -0.14 * ak));
+      if (n.act.type === 'tidy') turnBone(B.Spine, _qc.setFromAxisAngle(side, -0.12 * ak));
+      if (n.act.type === 'bow') { turnBone(B.Spine, _qc.setFromAxisAngle(side, -0.22 * ak)); if (B.Spine1) turnBone(B.Spine1, _qc.setFromAxisAngle(side, -0.18 * ak)); }
       if (n.act.type === 'pat') turnBone(B.Spine, _qc.setFromAxisAngle(_vb.set(0, 0, 1).applyQuaternion(n.root.quaternion), Math.sin(t * 9) * 0.1 * ak));
     }
     // head: look at the visitor's eyes (limited), with a little tilt and nodding while talking
     if (B.Head && n.look > 0.01) {
       const rel = wrapAngle(toYaw - n.yaw);
-      const yawH = THREE.MathUtils.clamp(rel, -1.0, 1.0) * n.look;
+      const lim = n.sitK > 0.5 ? 1.35 : 1.0;    // beside you on a sofa she has to turn further
+      const yawH = THREE.MathUtils.clamp(rel, -lim, lim) * n.look;
       B.Head.getWorldPosition(_va);
       const pitch = THREE.MathUtils.clamp(Math.atan2(player.eyeY - _va.y, Math.max(0.5, dist)), -0.5, 0.5) * n.look;
       if (B.Neck) turnBone(B.Neck, _qc.setFromAxisAngle(WORLD_UP, yawH * 0.4));
@@ -2368,9 +2590,9 @@ function updateNpcs(dt) {
     }
     if (n.act && B.Head) {
       const t = n.act.t;
-      if (n.act.type === 'nod') turnBone(B.Head, _qc.setFromAxisAngle(side, Math.max(0, Math.sin(t * 6.5)) * 0.22 * ak));
+      if (n.act.type === 'nod') turnBone(B.Head, _qc.setFromAxisAngle(side, -Math.max(0, Math.sin(t * 6.5)) * 0.22 * ak));
       if (n.act.type === 'look') turnBone(B.Head, _qc.setFromAxisAngle(WORLD_UP, Math.sin(t * 1.9) * 0.65 * ak));
-      if (n.act.type === 'tidy' || n.act.type === 'bow') turnBone(B.Head, _qc.setFromAxisAngle(side, 0.3 * ak));
+      if (n.act.type === 'tidy' || n.act.type === 'bow') turnBone(B.Head, _qc.setFromAxisAngle(side, -0.3 * ak));
       if (n.act.type === 'pat') turnBone(B.Head, _qc.setFromAxisAngle(_vb.set(0, 0, 1).applyQuaternion(n.root.quaternion), 0.22 * ak));
     }
     // arms: a held pose (photos), then an action on top; otherwise waving or talking
@@ -2453,13 +2675,23 @@ function say(n, lines, opts = null, end = null, mini = false) {
   dialogOpts.replaceChildren();
   dialogEl.hidden = false;
 }
+// Every conversation starts with the same choices: 詢問 (all the questions, explanations
+// and 請帶我去…), 互動 (see PLAY), 拍照, 陪我逛逛 (回去工作吧 while she is with you)
+// and 沒事，謝謝. Anything that sends her off waits until her last line is clicked away.
 function menuItems(n) {
-  if (n.follow) {
-    return [{ label: '聊聊天 💬', chat: true }, { label: '這裡是哪裡？', where: true }, { label: '一起拍照 📸', photo: true },
-      ...n.c.menu.flatMap((m) => m.sub || [m]).filter((m) => m.act), { label: '回去工作吧', dismiss: true }];
+  const play = playItems(n);
+  return [{ label: n.follow ? '聊天 💬' : '詢問 💬', ask: true }, play.length && { label: '互動 🎈', lines: '要做什麼呢？', sub: play },
+    !sit.seat && { label: '拍照 📸', photo: true },
+    n.follow ? { label: '回去工作吧', dismiss: true } : n.c.with && { label: '陪我逛逛 💞', company: true }].filter(Boolean);
+}
+function askItems(n) {
+  if (n.follow) return [{ label: '聊聊天', chat: true }, { label: '這裡是哪裡？', where: true }];
+  const items = [{ label: '請帶我去…', guide: true }];
+  for (const m of n.c.menu) {
+    if (m.bye || m.photo || m.guide) continue;    // goodbyes and photos have their own places
+    items.push(m);
   }
-  if (!n.c.with) return n.c.menu;
-  return [...n.c.menu.slice(0, -1), { label: '陪我逛逛 💞', company: true }, n.c.menu[n.c.menu.length - 1]];
+  return items;
 }
 const menuOpts = (n) => menuItems(n).map((m) => ({ label: m.label, go: () => runTopic(n, m) }));
 function mainMenu(n, first = false) {
@@ -2469,13 +2701,21 @@ function mainMenu(n, first = false) {
 function runTopic(n, m) {
   const back = { label: '返回', go: () => mainMenu(n) };
   const guideTo = (k, label) => ({ label, go: () => askHow(n, k) });
-  if (m.sub) say(n, m.lines, [...m.sub.map((x) => ({ label: x.label, go: () => runTopic(n, x) })), back]);
-  else if (m.company) startCompanion(n);
+  if (m.ask) say(n, n.follow ? '想聊什麼呢？' : '想問什麼呢？', [...askItems(n).map((x) => ({ label: x.label, go: () => runTopic(n, x) })), back]);
+  else if (m.sub) say(n, m.lines, [...m.sub.map((x) => ({ label: x.label, go: () => runTopic(n, x) })), back]);
+  else if (m.company) say(n, n.c.with.start, null, () => { startCompanion(n); closeDialog(); });   // she sets off once the line is gone
   else if (m.dismiss) say(n, n.c.with.bye, null, () => dismissCompanion(n, true));
   else if (m.chat) say(n, pick(n.c.with.chat), null, () => mainMenu(n));
   else if (m.where) say(n, n.c.with.where.replace('{place}', (W.key === 'hotel' ? locateHotel() : W.key === 'park' ? locatePark() : locateMall())[0]), null, () => mainMenu(n));
-  else if (m.guide) say(n, '想去哪裡呢？我帶你去～', [...Object.entries(n.c.guide).map(([k, g]) => guideTo(k, g.zh)), back]);
+  else if (m.guide && n.c.guide) {
+    say(n, '想去哪裡呢？我帶你去～', [...Object.entries(n.c.guide).filter(([k]) => !n.c.noGuide?.includes(k)).map(([k, g]) => guideTo(k, g.zh)), back]);
+  } else if (m.guide) {   // no walking routes here: take you there in a blink
+    const here = PLACES.find((p) => Math.hypot(b2t(...p.p).x - player.pos.x, b2t(...p.p).z - player.pos.z) < 6);
+    const places = PLACES.filter((p) => p !== here).slice(0, 9);         // with 沒事，謝謝 that is ten, one per number key
+    say(n, '想去哪裡呢？我送你過去～', [...places.map((p) => ({ label: p.zh, go: () => say(n, `${p.zh}，這就送你過去 ✨`, null, () => placeTrip(p)) })), ...(places.length < 9 ? [back] : [])]);
+  }
   else if (m.photo) startPhoto(n);
+  else if (m.pat) { patHead(n); say(n, '嘿嘿～好舒服 ♡', null, () => mainMenu(n)); }
   else if (m.act) { doAct(n, m.act); avatarEmote(m.act === 'hug' ? 'yes' : 'wave'); say(n, m.lines, null, () => mainMenu(n)); }
   else if (m.bye) { n.act = null; greet(n); avatarEmote('wave'); say(n, m.bye, null, closeDialog); }
   else if (m.trips) say(n, m.lines, [...m.trips.map((t) => ({ label: t.label, go: () => say(n, t.line, null, () => placeTrip(t)) })), back]);
@@ -2486,12 +2726,13 @@ function runTopic(n, m) {
 }
 function askHow(n, k) {
   say(n, `${n.c.guide[k].zh}嗎？要跟我一起走過去，還是直接過去呢？`, [
-    { label: '跟熊熊走過去 🐾', go: () => startGuide(n, k) },
+    { label: `跟${n.c.zh}走過去 🐾`, go: () => say(n, `好的，${n.c.guide[k].zh}這邊請，跟我來～ 🐾`, null, () => { startGuide(n, k); closeDialog(); }) },
     { label: '直接過去 ✨', go: () => directTrip(n, k) },
     { label: '返回', go: () => mainMenu(n) }]);
 }
 function talkTo(n) {
   if (dialog.npc === n) { nextLine(); return; }
+  if (n.mode === 'guide') { n.quiet = false; n.msg = ''; guideSay(n, '這邊請，跟我來～ 🐾'); return; }   // bring the walking box back
   dialog.turn = 0.9;
   n.act = null;
   mainMenu(n, ['post', 'patrol', 'outing', 'follow'].includes(n.mode));
@@ -2516,7 +2757,7 @@ function closeDialog() {
   const n = dialog.npc;
   dialog.npc = null; dialog.opts = null; dialog.end = null;
   dialogEl.hidden = true;
-  if (n && npcs.includes(n) && n.mode === 'arrived' && photo.npc !== n) goHome(n);   // done here: walk back to the post
+  if (n && npcs.includes(n) && n.mode === 'arrived' && !n.intro && photo.npc !== n) goHome(n);   // done here: walk back to the post
 }
 function updateDialog(dt) {
   const n = dialog.npc;
@@ -2668,7 +2909,7 @@ const _eye = new THREE.Vector3(), _back = new THREE.Vector3(), _tp = new THREE.V
 
 async function loadAvatar(def) {
   const buf = await fetchWithProgress(def.file, () => { });
-  const gltf = await loader.parseAsync(jsonToGlb(buf), '');
+  const gltf = await charLoader.parseAsync(jsonToGlb(buf), '');
   const model = gltf.scene;
   const box = new THREE.Box3().setFromObject(model);
   const s = def.h / Math.max(0.01, box.max.y - box.min.y);
@@ -2710,6 +2951,8 @@ async function loadAvatar(def) {
     mixer.setTime(sitA.getClip().duration - 0.001);
     root.updateMatrixWorld(true);
     root.worldToLocal(A.hips.getWorldPosition(A.sitOff));
+    const kb = bones.LowerLegL || bones['LowerLeg.L'];               // the knee, as the clip ends
+    if (kb) A.kneeFwd = root.worldToLocal(kb.getWorldPosition(new THREE.Vector3())).z - A.sitOff.z;
     sitA.stop();
   }
   const handL = def.arms && bones[def.arms.hand + 'L'];
@@ -2740,7 +2983,7 @@ function setSkin(i) {
   view.skin = i;
   if (avatar?.skin) avatar.skin.color.setHex(SKIN_TONES[i]?.[1] ?? SKIN_TONES[0][1]);
   document.querySelectorAll('#avatar-skin button').forEach((b, k) => b.setAttribute('aria-pressed', String(k === i)));
-  document.getElementById('avatar-skin-row').hidden = !AVATARS.find((a) => a.id === view.avatar)?.skin;
+  document.getElementById('avatar-skin-row').hidden = LITE || !AVATARS.find((a) => a.id === view.avatar)?.skin;
 }
 function setAvatarColor(i) {
   view.color = i;
@@ -2773,7 +3016,7 @@ function updateAvatar(dt) {
   const inPhoto = !!(photo.npc && photo.spot);
   if (!inPhoto && !thirdActive()) { A.root.visible = false; A.prev.copy(player.pos); return; }
   A.root.visible = true;
-  let want = 'idle', wantYaw = A.yaw, loop;
+  let want = 'idle', wantYaw = A.yaw, loop, lying = false;
   const pose = inPhoto ? photo.npc.pose : null;
   if (inPhoto) {
     A.root.position.copy(photo.spot);
@@ -2784,11 +3027,23 @@ function updateAvatar(dt) {
     const st = sit.seat;
     wantYaw = st.yaw + Math.PI;
     A.yaw = wantYaw;
-    want = sit.dir < 0 ? 'stand' : 'sit';
-    // seat surface under the hips, from the measured end of the sitting clip
-    _ap.copy(A.sitOff).applyAxisAngle(WORLD_UP, wantYaw);
-    A.root.position.set(st.pos.x - _ap.x, st.pos.y + 0.06 - _ap.y, st.pos.z - _ap.z);
     A.speed = 0;
+    if (st.kind === 'bed') {
+      // on the back, head on the pillow (the seat), feet toward the foot of the bed
+      lying = true;
+      want = 'idle';
+      const fx = Math.sin(wantYaw), fz = Math.cos(wantYaw);
+      A.root.position.set(st.pos.x + fx * A.def.h * 0.95, st.pos.y + 0.14, st.pos.z + fz * A.def.h * 0.95);
+    } else {
+      want = sit.dir < 0 ? 'stand' : 'sit';
+      // seat surface under the hips, from the measured end of the sitting clip, moved so
+      // the knees come just past the front of the cushion
+      const fx = Math.sin(wantYaw), fz = Math.cos(wantYaw);
+      st.edge ??= cushionEdge(st.pos, fx, fz);
+      const sh = RECLINED.has(st.kind) ? 0 : kneeShift(st.edge, A.kneeFwd ?? 0.35);
+      _ap.copy(A.sitOff).applyAxisAngle(WORLD_UP, wantYaw);
+      A.root.position.set(st.pos.x + fx * sh - _ap.x, st.pos.y + 0.06 - _ap.y, st.pos.z + fz * sh - _ap.z);
+    }
   } else {
     A.root.position.copy(player.pos);
     const dx = player.pos.x - A.prev.x, dz = player.pos.z - A.prev.z;
@@ -2805,7 +3060,8 @@ function updateAvatar(dt) {
   else A.emote = null;
   A.prev.copy(player.pos);
   A.yaw += wrapAngle(wantYaw - A.yaw) * (1 - Math.exp(-dt * 10));
-  A.root.rotation.y = A.yaw;
+  A.root.rotation.order = 'YXZ';                  // lie down first, then turn
+  A.root.rotation.set(lying ? -Math.PI / 2 : 0, A.yaw, 0);
   playClip(want, 0.25, loop, A.force && want === A.emote);
   A.force = false;
   if (want === 'walk') A.cur.setEffectiveTimeScale(THREE.MathUtils.clamp(A.speed / A.def.walk, 0.6, 1.6));
@@ -2814,6 +3070,18 @@ function updateAvatar(dt) {
   A.mixer.update(dt);
   const hold = pose && A.def.hold[pose];
   if (hold && A.cur.time >= hold) A.cur.paused = true;
+  // seated (not lying): elbows relaxed, hands resting on the knees
+  if (sit.seat && !lying && A.def.arms && sit.k > 0) {
+    const { upper, lower, hand } = A.def.arms, B = A.bones, k = ease(sit.k);
+    A.root.updateMatrixWorld(true);
+    for (const [s, side] of [['L', 1], ['R', -1]]) {
+      if (!B[upper + s] || !B[lower + s] || !B[hand + s]) continue;
+      for (const [b, c, v] of [[upper, lower, LAP_ARMS[0]], [lower, hand, LAP_ARMS[1]]]) {
+        _vd.set(side * A.leftSign * v[0], v[1], v[2]).applyQuaternion(A.root.quaternion).normalize();
+        pointBone(B[b + s], B[c + s], _vd, k);
+      }
+    }
+  }
   // people have no heart clip: put the hands together at the chest by hand
   if (pose === 'heart' && A.def.arms) {
     const { upper, lower, hand } = A.def.arms, B = A.bones;
@@ -2911,8 +3179,8 @@ function updateSeating(dt) {
     const st = sit.seat, e = ease(sit.k);
     if (sit.dir > 0 && sit.k < 1) {          // turn to face the way the seat faces
       player.yaw = sit.yaw0 + wrapAngle(st.yaw - sit.yaw0) * e;
-      player.pitch = sit.pitch0 + ((st.kind === 'lounger' ? 0.08 : -0.06) - sit.pitch0) * e;
-    } else if (sit.dir > 0 && st.kind !== 'lounger') {
+      player.pitch = sit.pitch0 + ((SEAT_PITCH[st.kind] ?? -0.06) - sit.pitch0) * e;
+    } else if (sit.dir > 0 && !RECLINED.has(st.kind)) {
       const off = wrapAngle(player.yaw - st.yaw);   // look around, but not over your shoulder
       if (Math.abs(off) > 1.9) player.yaw = st.yaw + Math.sign(off) * 1.9;
     }
@@ -2949,15 +3217,23 @@ function updateSeating(dt) {
   else if (ridingNow) text = '下車';
   else if (liftCall) text = '呼叫電梯';
   else if (portalCand) text = portalPanel.hidden ? '傳送門 · 選擇目的地' : '關閉傳送選單';
-  else if (doorCand) text = doorCand.want ? '關門' : `刷卡開門 · ${doorCand.c.zh}`;
+  else if (doorCand) text = doorCand.want ? '關門' : `${doorCand.c.card ? '刷卡開門' : '開門'} · ${doorCand.c.zh}`;
   else if (npcCand) text = dialog.npc ? '繼續' : patCand ? '摸摸頭' : `和${npcCand.c.zh}說話`;
   else if (rideCand) text = rideQueued === rideCand ? (rideCand.waitText || '等待列車回站…') : (rideCand.available && !rideCand.available() ? `排隊搭乘${rideCand.zh}` : `搭乘${rideCand.zh}`);
-  else if (candidate?.kind === 'lounger') text = '躺下';
+  else if (RECLINED.has(candidate?.kind)) text = '躺下';
   if (show && seatLabel.textContent !== text) seatLabel.textContent = text;
   seatBtn.classList.toggle('ride', !!(rideCand || ridingNow || portalCand || npcCand));
+  const sc = started && !switching && seatedCompanion();
+  talkBtn.hidden = !sc;
+  if (sc) { const t = `和${sc.c.zh}聊天`; if (talkBtn.lastChild.textContent !== t) talkBtn.lastChild.textContent = t; }
   rideHud.hidden = !ridingNow;
   if (ridingNow && rideName.textContent !== riding.ride.zh) rideName.textContent = riding.ride.zh;
 }
+// sitting together: the companion on the next seat can still be talked to (T or the button)
+const seatedCompanion = () => (sit.seat && sit.dir > 0 && sit.k >= 1 && !dialog.npc && !photo.npc
+  ? npcs.find((n) => n.follow && n.outing?.phase === 'sit' && n.root.position.distanceTo(sit.seat.pos) < 3) : null);
+const talkBtn = document.getElementById('talk-btn');
+talkBtn.addEventListener('click', (e) => { const n = seatedCompanion(); if (n) talkTo(n); e.currentTarget.blur(); });
 function doAction() {
   if (switching || fading) return;
   if (sit.seat) standUp();
@@ -2983,6 +3259,21 @@ ray.firstHitOnly = true;
 const _v = new THREE.Vector3(), _o = new THREE.Vector3(), _n = new THREE.Vector3();
 
 const dynColliders = [];   // hotel lift car and landing doors (they move, so no BVH)
+// Sitting: the hips go where the knees come just past the front of the cushion, so the
+// shins hang in front of the seat instead of through it. The cushion's front is found by
+// looking down a little ahead of the seat point, step by step, until it drops away.
+const _eo = new THREE.Vector3(), _down = new THREE.Vector3(0, -1, 0);
+function cushionEdge(p, fx, fz) {
+  let gap = 0;                                              // a slatted bench has small gaps: need 10 cm of nothing
+  for (let d = 0.1; d <= 1.3; d += 0.05) {
+    ray.set(_eo.set(p.x + fx * d, p.y + 0.2, p.z + fz * d), _down);
+    ray.far = 0.35;
+    const h = ray.intersectObject(collider, false)[0];      // the furniture only, not the characters
+    if (!h || h.point.y < p.y - 0.1) { if (++gap === 3) return d - 0.1; } else gap = 0;
+  }
+  return 0.45;
+}
+const kneeShift = (edge, knee) => THREE.MathUtils.clamp(edge - knee + 0.06, -0.3, 0.35);
 function castHit(origin, dir, far) {
   ray.set(origin, dir);
   ray.far = far;
@@ -3142,10 +3433,11 @@ function locateHotel() {
         : bx < 6 ? ['廚房', 'Kitchen'] : bx < 14 ? ['主浴室', 'Master Bath'] : ['更衣室', 'Walk-in Closet'];
     return [`總統套房 · ${room[0]}`, `Presidential Suite · ${room[1]}`];
   }
-  if (z > 11 && z < 16.2 && bx > -20 && bx < 20 && by > 0 && by < 30) {
-    if (bx > -1.6 && bx < 4.4 && by < 13.5) return ['4007 豪華客房', 'Deluxe King · 4007'];
-    if (bx > 4 && bx < 10 && by > 16.5) return ['4008 雙床客房', 'Twin Room · 4008'];
-    return ['4F 客房樓層', 'Guest Floor'];
+  if (z > 9.2 && z < 16.2 && bx > -20 && bx < 20 && by > 0 && by < 30) {      // 3F and 4F guest floors
+    const fl = z > 12.4 ? '4' : '3';
+    if (bx > -1.6 && bx < 4.4 && by < 13.5) return [`${fl}007 豪華客房`, `Deluxe King · ${fl}007`];
+    if (bx > 4 && bx < 10 && by > 16.5) return [`${fl}008 雙床客房`, `Twin Room · ${fl}008`];
+    return [`${fl}F 客房樓層`, 'Guest Floor'];
   }
   if (bx >= 20 && bx < 34.2 && by > 0.4 && by < 22.2) return ['咖啡廳', 'Aurora Café'];
   if (bx >= 20.5 && bx < 34 && by > -5.5 && by <= 0.4) return ['咖啡廳露台', 'Café Terrace'];
@@ -3159,11 +3451,13 @@ function locateHotel() {
     if (bx < -11) return by > 19 ? ['電梯廳', 'Elevator Hall'] : ['大廳酒廊', 'Lobby Lounge'];
     return ['挑高大廳', 'Grand Lobby'];
   }
+  if (bx > 0 && bx < 4.4 && by < 34.45 && z < 3.5) return ['更衣淋浴室', 'Changing Room'];
   if (bx > 0) return ['室內泳池', 'AQUA Pool & Spa'];
   if (z > 3.5) {
     if (by < 33.5) return ['2F 設施走廊', 'Le Jardin Bar & Boutique'];
     return bx < -10 ? ['精品店', 'Aurora Boutique'] : ['花園酒吧', 'Le Jardin Bar'];
   }
+  if (by < 34.1 && bx < -12.55) return bx < -16.4 ? ['男廁', 'Gentlemen'] : ['女廁', 'Ladies'];
   return ['健身房', 'Aurora Fitness'];
 }
 const CARO = [-48, 8], TEA = [-48, -30], LAKE = [54, -40];
@@ -3527,9 +3821,10 @@ addEventListener('keydown', (e) => {
     else if (e.code === 'KeyQ') endPhoto();
     if (!['KeyH', 'KeyM'].includes(e.code)) { e.preventDefault(); return; }
   }
-  if (dialog.opts && /^Digit[0-9]$/.test(e.code)) { chooseOpt((+e.code.slice(5) + 9) % 10); e.preventDefault(); return; }
+  if (dialog.opts && !dialog.mini && /^Digit[0-9]$/.test(e.code)) { chooseOpt((+e.code.slice(5) + 9) % 10); e.preventDefault(); return; }
   if (e.code === 'KeyF' && !sit.seat && !riding.ride) { player.fly = !player.fly; player.vy = 0; updateFlyBtn(); }
   if (e.code === 'KeyV') toggleView();
+  if (e.code === 'KeyT') { const n = seatedCompanion(); if (n) talkTo(n); }
   if (e.code === 'KeyH') help.hidden = !help.hidden;
   if (e.code === 'KeyM') map.parentElement.hidden = !map.parentElement.hidden;
   if (e.code === 'KeyP' && !SOLO) teleport(portalPlace(W, true));
@@ -3615,6 +3910,29 @@ const flyBtn = document.getElementById('btn-fly');
 function updateFlyBtn() { flyBtn.setAttribute('aria-pressed', String(player.fly)); flyBtn.textContent = player.fly ? '飛行中' : '步行'; }
 flyBtn.addEventListener('click', (e) => { if (riding.ride || switching || photo.npc) return; player.fly = !player.fly; player.vy = 0; updateFlyBtn(); e.currentTarget.blur(); });
 document.getElementById('btn-help').addEventListener('click', (e) => { help.hidden = !help.hidden; e.currentTarget.blur(); });
+// the bottom bar: 快速傳送 and 設定 each open a panel; one at a time
+const menuPanels = { places: document.getElementById('places-panel'), settings: document.getElementById('settings-panel') };
+function closeMenus(except) {
+  for (const [k, el] of Object.entries(menuPanels)) {
+    if (k === except) continue;
+    el.hidden = true;
+    document.getElementById('btn-' + k).setAttribute('aria-expanded', 'false');
+  }
+}
+for (const k of Object.keys(menuPanels)) {
+  document.getElementById('btn-' + k).addEventListener('click', (e) => {
+    const open = menuPanels[k].hidden;
+    closeMenus(k);
+    menuPanels[k].hidden = !open;
+    e.currentTarget.setAttribute('aria-expanded', String(open));
+    e.currentTarget.blur();
+  });
+}
+// a choice that opens something else, or a place, closes the panel; the toggles keep it open
+for (const id of ['btn-chars', 'btn-map', 'btn-help', 'btn-portal']) document.getElementById(id).addEventListener('click', () => closeMenus());
+chips.addEventListener('click', () => closeMenus());
+canvas.addEventListener('pointerdown', () => closeMenus());
+addEventListener('keydown', (e) => { if (e.code === 'Escape') closeMenus(); });
 document.getElementById('btn-map').addEventListener('click', (e) => { map.parentElement.hidden = !map.parentElement.hidden; e.currentTarget.blur(); });
 if (SOLO) document.getElementById('btn-portal').hidden = true;
 document.getElementById('btn-portal').addEventListener('click', (e) => { if (!switching && W) teleport(portalPlace(W, true)); e.currentTarget.blur(); });
@@ -3682,7 +4000,7 @@ if (renderer) enterWorld(first, false).then(() => {
   // test hooks: advance the simulation without waiting for real frames
   const simulate = (code, seconds) => { keys.add(code); for (let t = 0; t < seconds; t += 1 / 60) update(1 / 60); keys.delete(code); return player.pos.clone(); };
   const advance = (seconds, fps = 30) => { for (let t = 0; t < seconds; t += 1 / fps) step(1 / fps); };
-  window.__world = { doors, toggleDoor, findDoor, sitNear, placeBeside, startCompanion, dismissCompanion, steps, get companion() { return companion; }, startOuting, useAvatar, AVATARS, POSES, view, get avatar() { return avatar; }, toggleView, applyThirdPerson, sit, SEATS: () => SEATS, sitDown, POSE, reposeNpcs, npcs, dialog, talkTo, chooseOpt, photo, startPhoto, shoot, endPhoto, setPose, doAct, patHead, looksAtHead, startGuide, directTrip, HOTEL_GUIDE, castHit, b2t, setCharacter, findNpc, onEscalator, openPortalMenu, worlds: WORLD_KEYS, scene, camera, player, teleport, get PLACES() { return PLACES; }, get W() { return W; }, renderer, simulate, advance, locate, rides, riding, lift, doAction, nearPortal: () => portalCand, warpTo, portalPlace, isSwitching: () => switching };
+  window.__world = { findPath, blockedBetween, doors, toggleDoor, findDoor, sitNear, placeBeside, startCompanion, dismissCompanion, steps, get companion() { return companion; }, startOuting, useAvatar, AVATARS, POSES, view, get avatar() { return avatar; }, toggleView, applyThirdPerson, sit, SEATS: () => SEATS, sitDown, POSE, reposeNpcs, npcs, dialog, talkTo, chooseOpt, photo, startPhoto, shoot, endPhoto, setPose, doAct, patHead, looksAtHead, startGuide, directTrip, HOTEL_GUIDE, castHit, b2t, setCharacter, findNpc, onEscalator, openPortalMenu, worlds: WORLD_KEYS, scene, camera, player, teleport, get PLACES() { return PLACES; }, get W() { return W; }, renderer, simulate, advance, locate, rides, riding, lift, doAction, nearPortal: () => portalCand, warpTo, portalPlace, isSwitching: () => switching };
 }).catch((err) => {
   console.error(err);
   fail(`載入失敗：${err.message}。若是直接開啟檔案，請改用本機伺服器（python3 -m http.server）。`);
