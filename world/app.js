@@ -69,6 +69,26 @@ const WORLDS = {
       { key: '0', zh: '城堡通道', en: 'Castle Gate Hall', p: [0, 45.5, 0.05], yaw: 0 },
     ],
   },
+  nature: {
+    key: 'nature', zh: '翠谷自然公園', short: '自然公園', en: 'Emerald Valley', sub: 'Nature Park & Glamping · 翠谷自然公園',
+    base: 'nature/viewer/scene/', prefix: 'nature_', has: ['mapdata'], walk: 2.6, run: 6.5, fly: 10.0,
+    sun: { phi: 48, theta: -35, power: 4.2 }, env: 0.42, hemi: 0.36, fog: [0xcddde4, 240, 950],
+    lightRange: { Campfire: 16 }, lightDist: 10,
+    map: { x0: -42, x1: 74, y0: -104, y1: 100 },
+    portal: { p: [-25.0, -91.0, 0.15], yaw: -Math.PI / 2, arriveYaw: 0 },
+    places: [
+      { key: '1', zh: '入口廣場', en: 'Entrance Plaza', p: [-12, -93, 0.15], yaw: 0 },
+      { key: '2', zh: '森林步道', en: 'Forest Trail', p: [-17, -40, 1.15], yaw: 0 },
+      { key: '3', zh: '溪流木橋', en: 'Creek Bridge', p: [-7.0, -21.2, 1.35], yaw: -Math.PI / 2 },
+      { key: '4', zh: '瀑布觀景台', en: 'Falls Deck', p: [-12.0, 78.5, 3.4], yaw: -0.69 },
+      { key: '5', zh: '瀑布水潭', en: 'Falls Pool', p: [-6.0, 75.0, 2.95], yaw: -0.35 },
+      { key: '6', zh: '豪華露營區', en: 'Glamping Meadow', p: [29.5, -4.0, 1.7], yaw: -0.97 },
+      { key: '7', zh: '鐘型帳篷', en: 'Bell Tent', p: [34.6, 8.0, 1.98], yaw: Math.PI / 2 },
+      { key: '8', zh: '露營車', en: 'Camper Van', p: [38.5, -12.4, 2.25], yaw: 2.0 },
+      { key: '9', zh: '營火區', en: 'Campfire', p: [47.0, 1.0, 1.7], yaw: 0 },
+      { key: '0', zh: '營地服務台', en: 'Camp Office', p: [24.5, -10.5, 1.63], yaw: -Math.PI / 2 },
+    ],
+  },
   mall: {
     key: 'mall', zh: '極光購物中心', short: '購物中心', en: 'Aurora Galleria', sub: 'Shopping · Dining · Cinema · 購物中心',
     base: 'mall/viewer/scene/', prefix: 'mall_', has: ['lift', 'escalators'], walk: 2.6, run: 6.0, fly: 8.0,
@@ -322,7 +342,7 @@ function jsonToGlb(buf) {
   return out.buffer;
 }
 
-let LIFT_CFG = null, RIDES_CFG = null, ESCALATORS = [], DOORS_CFG = null;
+let LIFT_CFG = null, RIDES_CFG = null, ESCALATORS = [], DOORS_CFG = null, MAPDATA = null;
 const getJson = async (url) => { try { const r = await fetch(url); return r.ok ? await r.json() : null; } catch { return null; } };
 async function loadAll(w) {
   const sizes = (await getJson(w.base + 'manifest.json')) || {};
@@ -331,6 +351,7 @@ async function loadAll(w) {
   LIFT_CFG = w.has.includes('lift') ? await getJson(w.base + 'lift.json') : null;
   DOORS_CFG = w.has.includes('doors') ? await getJson(w.base + 'doors.json') : null;
   RIDES_CFG = w.has.includes('rides') ? await getJson(w.base + 'rides.json') : null;
+  MAPDATA = w.has.includes('mapdata') ? await getJson(w.base + 'map.json') : null;
   ESCALATORS = ((w.has.includes('escalators') && await getJson(w.base + 'escalators.json')) || []).map((e) => ({ a: b2t(...e.a), b: b2t(...e.b), w: e.w, dir: e.dir }));
   SEATS = ((await getJson(w.base + 'seats.json')) || [])
     .map(([x, y, z, yaw, kind]) => ({ yaw, kind, pos: new THREE.Vector3(x, z, -y) }));
@@ -420,8 +441,8 @@ async function prepare(roots) {
         o.castShadow = false;
         o.renderOrder = 2;
       } else if (m.name === 'Water') {
-        Object.assign(m, { transparent: true, opacity: W.key === 'park' ? 0.72 : 0.62, depthWrite: false, roughness: 0.03, metalness: 0.1 });
-        m.color.set(W.key === 'park' ? 0x2a8fb0 : 0x1d97b8);
+        Object.assign(m, { transparent: true, opacity: W.key === 'park' ? 0.72 : W.key === 'nature' ? 0.68 : 0.62, depthWrite: false, roughness: 0.03, metalness: 0.1 });
+        m.color.set(W.key === 'park' ? 0x2a8fb0 : W.key === 'nature' ? 0x3a8e9c : 0x1d97b8);
         o.renderOrder = 1;
       } else if (m.name === 'WaterJet') {
         Object.assign(m, { transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
@@ -556,7 +577,7 @@ function buildPortal(w) {
   }
   const swirlMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
-    uniforms: { t: { value: 0 }, a: { value: new THREE.Color({ hotel: 0xff8fd0, park: 0xffd27a, mall: 0x9ff0d8 }[w.key]) }, b: { value: new THREE.Color(0x6fb8ff) } },
+    uniforms: { t: { value: 0 }, a: { value: new THREE.Color({ hotel: 0xff8fd0, park: 0xffd27a, mall: 0x9ff0d8, nature: 0xa6e88a }[w.key]) }, b: { value: new THREE.Color(0x6fb8ff) } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: `uniform float t; uniform vec3 a; uniform vec3 b; varying vec2 vUv;
       void main(){
@@ -1324,7 +1345,7 @@ const HOTEL_GUIDE = {
 };
 const CHARACTERS = [
   {
-    id: 'bear', world: 'hotel', zh: '奧蘿拉熊', en: 'Aurora Bear', role: '飯店吉祥物',
+    id: 'bear', world: 'hotel', zh: '奧蘿拉熊', en: 'Aurora Bear', role: '飯店吉祥物', lookUp: 0.15, lookSide: 0.35,
     file: 'characters/maid_bear/maid_bear.gltf.json', p: [-3.2, 4.2, 0.04], face: [0.0, 0.0], height: 1.9,   // a little taller than the visitor's body
     hello: '歡迎光臨 Grand Aurora！我是飯店的吉祥物奧蘿拉熊 🐻 有什麼可以幫你的嗎？',
     again: '還有什麼我可以幫忙的嗎？',
@@ -1420,6 +1441,8 @@ const CHARACTERS = [
     {
       // behind the square INFORMATION counter (2.45 x 2.05 m, 1.1 m high), talked to across it
       id: 'mall_desk', world: 'mall', en: 'Mall Staff', zh: '米雅', role: '服務台 · 姊姊', p: [0.0, 20.5, 0.02], face: [0.0, 0.0], reach: 3.6,
+      // along behind the counter, and a rest on the desk chair
+      outings: [{ via: [[-1.0, 20.5]] }, { via: [[0.4, 20.45]] }, { via: [[0.75, 20.2]], seat: [0.75, 20.75], h: 0.56, face: [0.75, 0.0] }],
       file: 'characters/staff_robot/staff_robot.gltf.json',
       hello: '歡迎光臨 Aurora Galleria！我是服務台的米雅，需要幫您找店嗎？',
       menu: [
@@ -1459,7 +1482,9 @@ const CHARACTERS = [
     },
     // ... and at Starlight Kingdom: 米雅 by the west ticket booth, 米露 round the Star Fountain
     {
-      id: 'park_desk', world: 'park', en: 'Park Staff', zh: '米雅', role: '售票處 · 姊姊', p: [-14.9, -99.4, 0.04], face: [-14.9, -112.0],
+      // inside the west ticket booth, at its window; its door opens on the side facing the gate
+      id: 'park_desk', world: 'park', en: 'Park Staff', zh: '米雅', role: '售票處 · 姊姊', p: [-17.5, -98.2, 0.08], face: [-17.5, -112.0], reach: 3.6,
+      outings: [{ via: [[-16.4, -98.2]] }, { via: [[-17.0, -97.6]] }, { via: [[-18.6, -97.8]], seat: [-18.6, -97.05], h: 0.54, face: [-18.6, -112.0] }],
       file: 'characters/staff_robot/staff_robot.gltf.json',
       hello: '歡迎來到星光童話王國！我是遊客服務的米雅，需要幫您介紹園區嗎？',
       menu: [
@@ -1492,9 +1517,61 @@ const CHARACTERS = [
         },
         { label: '哪裡有點心？', lines: ['廣場兩邊有甜點和冰淇淋小攤，我最推薦草莓冰淇淋 🍦'] },
         { label: '走失了怎麼辦', lines: ['別擔心！到入口大門找米雅姊姊，她會幫你廣播 📢'] },
-        { label: '姊姊在哪裡？', lines: ['米雅姊姊在入口大門左邊的售票亭旁邊～ 出園前記得跟她說再見！'] },
+        { label: '姊姊在哪裡？', lines: ['米雅姊姊在入口大門左邊的售票亭裡面～ 出園前記得跟她說再見！'] },
         { label: '一起拍照 📸', photo: true },
         { label: '再見', bye: ['掰掰～ 要再來玩喔！'] },
+      ],
+    },
+    // ... and at Emerald Valley: 米雅 at the camp office, 米露 round the camp fire
+    {
+      id: 'nature_desk', world: 'nature', en: 'Camp Staff', zh: '米雅', role: '營地服務台 · 姊姊', p: [29.9, -10.5, 1.82], face: [20.0, -10.5], reach: 3.6,
+      // behind the camp office counter (the staff door is in the north wall), and a rest on her chair
+      outings: [{ via: [[29.9, -8.6]] }, { via: [[29.9, -12.6]] }, { via: [[30.3, -12.2]], seat: [30.9, -12.2], h: 0.54, face: [27.0, -12.2] }],
+      file: 'characters/staff_robot/staff_robot.gltf.json',
+      hello: '歡迎來到翠谷自然公園！我是營地服務台的米雅，今天要入住露營區嗎？',
+      menu: [
+        {
+          label: '園區導覽 🗺️', lines: ['步道沿著溪流一路往北，走到底就是瀑布和水潭，觀景台在水潭西邊。', '過了木橋就是我們的豪華露營區：鐘型帳篷、露營車和營火區都在這片草地上。想去哪裡，我直接送您過去 ✨'], trips: [
+            { label: '瀑布觀景台', line: '瀑布到了，水氣很涼，小心台階喔 🌊', p: [-12.0, 78.5, 3.4], yaw: -0.69 },
+            { label: '溪流木橋', line: '木橋到了，可以站在中間聽溪水的聲音 🌿', p: [-7.0, -21.2, 1.35], yaw: -Math.PI / 2 },
+            { label: '營火區', line: '營火區到了，晚上大家會在這裡烤棉花糖 🔥', p: [47.0, 1.0, 1.7], yaw: 0 },
+          ],
+        },
+        {
+          label: '我要入住 🏕️', lines: ['我們有鐘型帳篷和露營車兩種。帳篷裡有雙人床和小沙發，露營車有床、小廚房、餐桌，還有自己的衛浴。', '今天兩種都還有空位，想先看看哪一種呢？'], trips: [
+            { label: '看鐘型帳篷', line: '這是 1 號帳篷，床邊有小檯燈，躺下來可以看到帳篷頂 ⛺', p: [34.6, 8.0, 1.98], yaw: Math.PI / 2 },
+            { label: '看露營車', line: '這是 1 號露營車，餐桌可以收成床，冰箱裡有冰牛奶 🚐', p: [38.5, -12.4, 2.25], yaw: 2.0 },
+          ],
+        },
+        {
+          label: '洗手間與淋浴 🚿', lines: ['露營區北邊有一棟盥洗室，左邊是男生、右邊是女生，裡面有廁所、洗手台和淋浴間，24 小時都有熱水。', '旁邊還有戶外洗手槽，可以洗碗、刷牙、洗鞋子喔。'], trips: [
+            { label: '帶我過去', line: '盥洗室到了，左邊男生、右邊女生 🚻', p: [64.0, 20.4, 1.7], yaw: 0 },
+          ],
+        },
+        { label: '露營注意事項', lines: ['營火只在營火區生，熄燈時間是晚上十點。', '溪水很乾淨但很冰，下水的時候請注意安全 🙏'] },
+        { label: '妳也在這裡？', lines: ['是呀，這座自然公園新開幕，我和米露輪流過來幫忙。', '米露在營火區那邊，穿紅色制服的就是她 😊'] },
+        { label: '一起拍照 📸', photo: true },
+        { label: '再見', bye: ['祝您在翠谷玩得開心，晚上記得看星星喔！'] },
+      ],
+    },
+    {
+      id: 'nature_floor', world: 'nature', en: 'Camp Staff', zh: '米露', role: '露營區服務員 · 妹妹', p: [52.5, 8.0, 1.7], face: [47.0, 8.0],
+      file: 'characters/staff_lulu/staff_lulu.gltf.json',
+      patrol: [[52.5, 8.0], [50.9, 11.9], [47.0, 13.5], [43.1, 11.9], [41.5, 8.0], [43.1, 4.1], [47.0, 2.5], [50.9, 4.1]],
+      hello: '嗨～歡迎來露營！我是露營區服務員米露 🏕️',
+      menu: [
+        {
+          label: '有什麼好玩的？', lines: ['一定要去看瀑布！水從石壁上沖下來，水潭邊超涼快 🌊', '晚上的營火也很棒，我們會一起烤棉花糖～'], trips: [
+            { label: '去瀑布', line: '瀑布到了！站在觀景台上看最清楚 📸', p: [-12.0, 78.5, 3.4], yaw: -0.69 },
+            { label: '去營火區', line: '找個木頭椅子坐下，火很溫暖喔 🔥', p: [47.0, 1.0, 1.7], yaw: 0 },
+          ],
+        },
+        { label: '帳篷和露營車哪個好？', lines: ['帳篷比較有露營的感覺，躺著可以聽到外面的蟲叫聲 🦗', '露營車比較方便，有廚房和洗手間，下雨也不怕！'] },
+        { label: '洗手間在哪？', lines: ['帳篷區北邊那棟木屋就是盥洗室，有廁所也有淋浴間 🚿', '洗完澡來營火區烤火，頭髮一下子就乾了～'] },
+        { label: '森林裡有動物嗎？', lines: ['早上常常有松鼠跑來營地偷吃東西 🐿️', '溪裡還有小魚和螃蟹，不過要看仔細一點才找得到～'] },
+        { label: '姊姊在哪裡？', lines: ['米雅姊姊在入口這邊的營地服務台，有什麼問題都可以問她！'] },
+        { label: '一起拍照 📸', photo: true },
+        { label: '再見', bye: ['掰掰～ 晚上記得來營火區喔！'] },
       ],
     },
   ].map((c) => ({
@@ -1659,7 +1736,6 @@ const ACTS = {
   highfive: { dur: 1.7, R: [[0.35, 0.3, 0.88], [0.1, 0.8, 0.6]], at: 0.6 },
   hug: { dur: 2.6, at: 0.75 },
   pat: { dur: 2.2, L: [[0.45, -0.45, 0.6], [-0.55, 0.75, 0.45]], R: [[0.45, -0.45, 0.6], [-0.55, 0.75, 0.45]] },
-  stretch: { dur: 2.8, L: [[0.2, 1, 0.05], [-0.15, 1, 0]], R: [[0.2, 1, 0.05], [-0.15, 1, 0]] },
   tidy: { dur: 2.4, L: [[0.3, -1, 0.3], [0.15, -0.55, 0.85]], R: [[0.3, -1, 0.3], [0.15, -0.55, 0.85]] },
   nod: { dur: 1.5 },
   bow: { dur: 2.0, L: [[0.2, -1, 0.3], [-0.45, -0.55, 0.7]], R: [[0.2, -1, 0.3], [-0.45, -0.55, 0.7]] },
@@ -1674,10 +1750,10 @@ const PLAY = {
   base: (who) => [
     { label: '擊掌 ✋', act: 'highfive', lines: { bear: '耶～擊掌成功！✋ 你今天也很棒喔！', mia: '擊掌……這樣嗎？✋ 呵呵，有點不好意思呢。', milu: '耶～！✋ 再一次再一次！' }[who] },
     { label: '抱抱 🤗', act: 'hug', lines: { bear: '抱抱～ 謝謝你來 Grand Aurora，要玩得開心喔！💕', mia: '……被抱住了。謝謝您，感覺很溫暖。', milu: '抱抱！嘿嘿，你是今天第一個抱我的人 💕' }[who] },
+    { label: '握手 🤝', act: 'shake', lines: { bear: '握握手～ 熊掌是不是軟軟的？🐾', mia: '請多指教。能陪您走這一趟，是我的榮幸。', milu: '握手握手～ 我們是好朋友了！🤝' }[who] },
   ],
   bear: [{ label: '摸摸頭 🐻', pat: true }],
   mia: [
-    { label: '握手 🤝', act: 'shake', lines: '請多指教。能陪您走這一趟，是我的榮幸。' },
     { label: '鞠躬回禮 🙇', act: 'bow', lines: '承蒙照顧了。今後也請多多關照。' },
   ],
   milu: [
@@ -1752,7 +1828,7 @@ function updateOuting(n, dt) {
 // pops up beside you after a lift, a teleport or a flight, sits on a free seat next to
 // yours, and talks differently. One companion at a time; her own post stays empty
 // while she is out with you, and the choice survives a reload.
-const PERSON_OF = { bear: 'bear', staff_desk: 'mia', mall_desk: 'mia', park_desk: 'mia', staff_lobby: 'milu', mall_floor: 'milu', park_floor: 'milu' };
+const PERSON_OF = { bear: 'bear', staff_desk: 'mia', mall_desk: 'mia', park_desk: 'mia', nature_desk: 'mia', staff_lobby: 'milu', mall_floor: 'milu', park_floor: 'milu', nature_floor: 'milu' };
 const COMPANION = {
   bear: {
     start: '好呀！今天我就陪你逛逛 🐻💕 走吧走吧～', hello: '要去哪裡玩呢？我跟著你～ 🐾', again: '還想做什麼呢？',
@@ -2267,6 +2343,14 @@ function fadeIn() {
   fadeIn.t = setTimeout(() => { warp.hidden = true; warp.classList.remove('fade'); }, 700);
 }
 // 直接過去: fade out, arrive together, fade back in
+// where a route ends, as a place to stand: a little short of its end, facing along it
+function guideSpot(n, k) {
+  const r = n.c.guide[k].route;
+  const [ex, ey] = r[r.length - 1], [qx, qy] = r.length > 1 ? r[r.length - 2] : n.c.p;
+  const dl = Math.hypot(ex - qx, ey - qy) || 1;
+  const sx = ex - (ex - qx) / dl * 1.2, sy = ey - (ey - qy) / dl * 1.2;
+  return { p: [sx, sy, n.c.p[2]], yaw: Math.atan2(-(ex - sx), ey - sy) };
+}
 async function directTrip(n, k) {
   const g = n.c.guide[k], r = g.route;
   n.mode = 'trip';
@@ -2509,6 +2593,14 @@ function updateNpcs(dt) {
     else if (n.sitK > 0.01) wantYaw = n.sitYaw;
     else if (talking || photo.npc === n || !['post', 'patrol', 'outing'].includes(n.mode) || n.act?.type === 'pat' || (n.act?.type === 'bow' && dist < 6)) wantYaw = toYaw;
     else if (n.mode === 'outing') wantYaw = n.yaw;
+    // the bear can't turn her head far (no neck to speak of): past that she turns round
+    // to face a visitor who is close by, and stays facing them until they leave
+    if (n.c.lookSide && n.speed <= 0.15 && n.sitK <= 0.01 && n.mode !== 'outing') {
+      const off = Math.abs(wrapAngle(toYaw - n.yaw));
+      if (dist > 7) n.facing = false;
+      else if (off > n.c.lookSide) n.facing = true;
+      if (n.facing) wantYaw = toYaw;
+    }
     n.yaw += wrapAngle(wantYaw - n.yaw) * (1 - Math.exp(-dt * (n.speed > 0.15 ? 5 : 3)));
     n.root.rotation.y = n.yaw + (n.act?.type === 'spin' ? ease(Math.min(1, n.act.t / ACTS.spin.dur)) * Math.PI * 2 : 0);
     // greet once each time the visitor walks up to her post
@@ -2520,7 +2612,7 @@ function updateNpcs(dt) {
     if (n.mode === 'post' && n.c.outings && !dialog.npc && photo.npc !== n && !n.act && n.wave <= 0 && (n.outingT -= dt) <= 0) startOuting(n, pick(n.c.outings));
     if (standing && !n.path.length && !dialog.npc && photo.npc !== n && !n.act && n.wave <= 0 && dist < 22) {
       n.idle -= dt;
-      if (n.idle <= 0) { doAct(n, pick(n.c.idles || ['stretch', 'tidy', 'nod', 'look'])); n.idle = 7 + Math.random() * 8; }
+      if (n.idle <= 0) { doAct(n, pick(n.c.idles || ['tidy', 'nod', 'look'])); n.idle = 7 + Math.random() * 8; }
     }
     if (n.act) {
       n.act.t += dt;
@@ -2549,6 +2641,17 @@ function updateNpcs(dt) {
     for (const [k, b] of Object.entries(B)) b.quaternion.copy(n.base[k]);
     n.root.updateMatrixWorld(true);
     const side = _vs.set(-1, 0, 0).applyQuaternion(n.root.quaternion);   // rotating about this swings limbs forwards
+    // the bear's tail: a wag now and then, a quick happy wag (high five, hug, a pat on the
+    // head, posing for a photo), a sway in step while walking
+    if (B.Tail) {
+      const happy = ['highfive', 'hug', 'pat'].includes(n.act?.type) || (photo.npc === n && n.pose);
+      if ((n.wagT = (n.wagT ?? 4) - dt) <= 0) { n.wag = 1.6; n.wagT = 6 + Math.random() * 7; }
+      n.wag = Math.max(0, (n.wag || 0) - dt);
+      const amp = happy ? 0.9 : n.wag > 0 ? 0.7 * Math.min(1, n.wag / 0.4) : n.speed > 0.15 ? 0.25 : 0;
+      const fq = happy ? 13 : n.wag > 0 ? 8 : 9;
+      if (amp > 0.001) turnBone(B.Tail, _qc.setFromAxisAngle(WORLD_UP, Math.sin(n.t * fq) * amp));
+      if (n.speed > 0.15) turnBone(B.Tail, _qc.setFromAxisAngle(side, Math.abs(Math.sin(n.t * 9)) * 0.15));
+    }
     const w = Math.min(1, n.speed / NPC_SPEED);
     const breath = Math.sin(n.t * 2.0);
     const ak = n.act ? ease(Math.min(1, n.act.t / 0.3, (n.act.dur - n.act.t) / 0.35)) : 0;
@@ -2567,7 +2670,6 @@ function updateNpcs(dt) {
     // body language of the actions
     if (n.act && B.Spine) {
       const t = n.act.t;
-      if (n.act.type === 'stretch') turnBone(B.Spine, _qc.setFromAxisAngle(side, -0.16 * ak));
       // (a positive turn about 'side' tips the upper body back, so leaning in is negative)
       if (n.act.type === 'hug') turnBone(B.Spine, _qc.setFromAxisAngle(side, -0.14 * ak));
       if (n.act.type === 'tidy') turnBone(B.Spine, _qc.setFromAxisAngle(side, -0.12 * ak));
@@ -2577,10 +2679,12 @@ function updateNpcs(dt) {
     // head: look at the visitor's eyes (limited), with a little tilt and nodding while talking
     if (B.Head && n.look > 0.01) {
       const rel = wrapAngle(toYaw - n.yaw);
-      const lim = n.sitK > 0.5 ? 1.35 : 1.0;    // beside you on a sofa she has to turn further
+      const lim = n.c.lookSide ?? (n.sitK > 0.5 ? 1.35 : 1.0);    // beside you on a sofa she has to turn further
       const yawH = THREE.MathUtils.clamp(rel, -lim, lim) * n.look;
       B.Head.getWorldPosition(_va);
-      const pitch = THREE.MathUtils.clamp(Math.atan2(player.eyeY - _va.y, Math.max(0.5, dist)), -0.5, 0.5) * n.look;
+      // (the bear's head sits straight on the collar: lifting the chin or turning far
+      // stretches the throat and pulls the cheeks onto the shoulders)
+      const pitch = THREE.MathUtils.clamp(Math.atan2(player.eyeY - _va.y, Math.max(0.5, dist)), -0.5, n.c.lookUp ?? 0.5) * n.look;
       if (B.Neck) turnBone(B.Neck, _qc.setFromAxisAngle(WORLD_UP, yawH * 0.4));
       turnBone(B.Head, _qc.setFromAxisAngle(WORLD_UP, yawH * 0.6));
       const right = _vb.set(1, 0, 0).applyQuaternion(n.root.quaternion).applyAxisAngle(WORLD_UP, yawH);
@@ -2700,15 +2804,16 @@ function mainMenu(n, first = false) {
 }
 function runTopic(n, m) {
   const back = { label: '返回', go: () => mainMenu(n) };
-  const guideTo = (k, label) => ({ label, go: () => askHow(n, k) });
+  // pick a place and you are sent straight there, as everywhere else
+  const guideTo = (k, label) => ({ label, go: () => say(n, `${n.c.guide[k].zh}，這就送你過去 ✨`, null, () => placeTrip(guideSpot(n, k))) });
   if (m.ask) say(n, n.follow ? '想聊什麼呢？' : '想問什麼呢？', [...askItems(n).map((x) => ({ label: x.label, go: () => runTopic(n, x) })), back]);
   else if (m.sub) say(n, m.lines, [...m.sub.map((x) => ({ label: x.label, go: () => runTopic(n, x) })), back]);
   else if (m.company) say(n, n.c.with.start, null, () => { startCompanion(n); closeDialog(); });   // she sets off once the line is gone
   else if (m.dismiss) say(n, n.c.with.bye, null, () => dismissCompanion(n, true));
   else if (m.chat) say(n, pick(n.c.with.chat), null, () => mainMenu(n));
-  else if (m.where) say(n, n.c.with.where.replace('{place}', (W.key === 'hotel' ? locateHotel() : W.key === 'park' ? locatePark() : locateMall())[0]), null, () => mainMenu(n));
+  else if (m.where) say(n, n.c.with.where.replace('{place}', locateHere()[0]), null, () => mainMenu(n));
   else if (m.guide && n.c.guide) {
-    say(n, '想去哪裡呢？我帶你去～', [...Object.entries(n.c.guide).filter(([k]) => !n.c.noGuide?.includes(k)).map(([k, g]) => guideTo(k, g.zh)), back]);
+    say(n, '想去哪裡呢？我送你過去～', [...Object.entries(n.c.guide).filter(([k]) => !n.c.noGuide?.includes(k)).map(([k, g]) => guideTo(k, g.zh)), back]);
   } else if (m.guide) {   // no walking routes here: take you there in a blink
     const here = PLACES.find((p) => Math.hypot(b2t(...p.p).x - player.pos.x, b2t(...p.p).z - player.pos.z) < 6);
     const places = PLACES.filter((p) => p !== here).slice(0, 9);         // with 沒事，謝謝 that is ten, one per number key
@@ -2723,12 +2828,6 @@ function runTopic(n, m) {
   else if (m.portal) say(n, m.lines, [{ label: '直接帶我到傳送門 ✨', go: () => portalTrip() }, back]);
   else if (m.go) say(n, m.lines, [...m.go.map((k) => guideTo(k, `帶我去${n.c.guide[k].zh}`)), back]);
   else say(n, m.lines, null, () => mainMenu(n));
-}
-function askHow(n, k) {
-  say(n, `${n.c.guide[k].zh}嗎？要跟我一起走過去，還是直接過去呢？`, [
-    { label: `跟${n.c.zh}走過去 🐾`, go: () => say(n, `好的，${n.c.guide[k].zh}這邊請，跟我來～ 🐾`, null, () => { startGuide(n, k); closeDialog(); }) },
-    { label: '直接過去 ✨', go: () => directTrip(n, k) },
-    { label: '返回', go: () => mainMenu(n) }]);
 }
 function talkTo(n) {
   if (dialog.npc === n) { nextLine(); return; }
@@ -3506,11 +3605,35 @@ function locateMall() {
   if (lv === 0 && Math.hypot(bx, by - 30) < 9) return ['中央噴泉', 'Central Court'];
   return [`${F} 中庭迴廊`, `${F} Galleria`];
 }
+function locateNature() {
+  const bx = player.pos.x, by = -player.pos.z, z = player.pos.y;
+  if (z > 8 && player.fly) return ['翠谷上空', 'Above the Valley'];
+  if (by < -80 && bx > -31 && bx < 5) return ['入口廣場', 'Entrance Plaza'];
+  const van = MAPDATA?.vans.findIndex(([x, y]) => Math.abs(bx - x) < MAPDATA.van[0] / 2 && Math.abs(by - y) < MAPDATA.van[1] / 2) ?? -1;
+  if (van >= 0) return [`露營車 · ${van + 1} 號`, `Camper Van ${van + 1}`];
+  const tent = MAPDATA?.tents.findIndex(([x, y]) => Math.hypot(bx - x, by - y) < 3.6) ?? -1;
+  if (tent >= 0) return [`鐘型帳篷 · ${tent + 1} 號`, `Bell Tent ${tent + 1}`];
+  if (bx > 27.5 && bx < 32.6 && by > -14.2 && by < -6.8) return ['營地服務台', 'Camp Office'];
+  if (bx > 60 && bx < 68 && by > 23 && by < 29) return [bx < 64 ? '盥洗室 · 男' : '盥洗室 · 女', bx < 64 ? 'Wash House · Men' : 'Wash House · Women'];
+  if (Math.hypot(bx - 47, by - 8) < 5) return ['營火區', 'Campfire'];
+  if (bx > 22 && bx < 72 && by > -24 && by < 32) return ['豪華露營區', 'Glamping Meadow'];
+  if (bx > -16.5 && bx < -7 && by > 75.5 && by < 84) return ['瀑布觀景台', 'Falls Deck'];
+  if (by > 92 && z > 6) return ['瀑布頂端', 'Above the Falls'];
+  if (Math.hypot(bx, by - 86) < 13) return ['瀑布水潭', 'Falls Pool'];
+  for (const [[x0, y0], [x1, y1]] of MAPDATA?.bridges || []) {
+    const dx = x1 - x0, dy = y1 - y0, t = Math.max(0, Math.min(1, ((bx - x0) * dx + (by - y0) * dy) / (dx * dx + dy * dy)));
+    if (Math.hypot(bx - x0 - t * dx, by - y0 - t * dy) < 1.4) return ['溪流木橋', 'Creek Bridge'];
+  }
+  if (MAPDATA && MAPDATA.creek.some(([x, y]) => Math.hypot(bx - x, by - y) < 5)) return ['翠谷溪畔', 'Creekside'];
+  if (z > 7) return ['山坡', 'Mountainside'];
+  return ['森林步道', 'Forest Trail'];
+}
+const locateHere = () => (W.key === 'hotel' ? locateHotel() : W.key === 'park' ? locatePark() : W.key === 'nature' ? locateNature() : locateMall());
 function locate() {
   if (riding.ride && riding.dir > 0) return [`${riding.ride.zh} · 搭乘中`, `${riding.ride.en} · riding`];
   if (portalCand) return ['傳送門', 'Portal'];
   if (dialog.npc) return [`${dialog.npc.c.zh} · 對話中`, `${dialog.npc.c.en} · talking`];
-  return W.key === 'hotel' ? locateHotel() : W.key === 'park' ? locatePark() : locateMall();
+  return locateHere();
 }
 
 // ---------------------------------------------------------------------------
@@ -3576,6 +3699,30 @@ function drawHotelMap(dpr) {
     rect(-1.6, 0, 4.4, 13.5, 'rgba(214,180,110,0.35)');
     rect(4, 16.5, 10, 30, 'rgba(214,180,110,0.35)');
   }
+}
+function drawNatureMap(dpr) {
+  const D = MAPDATA;
+  if (!D) return;
+  const s = map.width / (MAP.x1 - MAP.x0);
+  const line = (pts, w, col) => {
+    mctx.strokeStyle = col; mctx.lineWidth = w; mctx.lineCap = 'round'; mctx.lineJoin = 'round';
+    mctx.beginPath();
+    pts.forEach(([x, y], i) => { const [a, b] = mapPt(x, y); if (i) mctx.lineTo(a, b); else mctx.moveTo(a, b); });
+    mctx.stroke();
+  };
+  rect(...[D.meadow[0], D.meadow[2], D.meadow[1], D.meadow[3]], 'rgba(150,200,110,0.22)');
+  rect(D.plaza[0], D.plaza[2], D.plaza[1], D.plaza[3], 'rgba(222,196,150,0.35)');
+  for (const t of D.trails) line(t, 2 * s, 'rgba(222,196,150,0.6)');
+  line(D.creek, 4.5 * s, 'rgba(80,170,200,0.8)');
+  circle(D.pool[0], D.pool[1], D.pool[2], 'rgba(80,170,200,0.85)');
+  for (const [a, b] of D.bridges) line([a, b], 2.2 * s, 'rgba(170,120,70,0.95)');
+  rect(D.deck[0], D.deck[2], D.deck[1], D.deck[3], 'rgba(170,120,70,0.8)');
+  rect(D.office[0], D.office[2], D.office[1], D.office[3], 'rgba(60,120,110,0.85)', 'rgba(242,196,109,0.8)');
+  if (D.wash) rect(D.wash[0], D.wash[2], D.wash[1], D.wash[3], 'rgba(60,120,110,0.85)', 'rgba(242,196,109,0.8)');
+  for (const [x, y] of D.tents) circle(x, y, 3.9, 'rgba(240,232,214,0.9)', 'rgba(242,196,109,0.8)');
+  for (const [x, y] of D.vans) rect(x - D.van[0] / 2, y - D.van[1] / 2, x + D.van[0] / 2, y + D.van[1] / 2, 'rgba(210,214,222,0.9)', 'rgba(242,196,109,0.8)');
+  circle(D.fire[0], D.fire[1], 1.4, 'rgba(255,140,60,0.95)');
+  mctx.lineWidth = dpr;
 }
 function drawParkMap(dpr) {
   const s = map.width / (MAP.x1 - MAP.x0);
@@ -3660,7 +3807,7 @@ function drawMap() {
   mctx.setTransform(1, 0, 0, 1, 0, 0);
   mctx.clearRect(0, 0, map.width, map.height);
   mctx.lineWidth = dpr;
-  if (W.key === 'hotel') drawHotelMap(dpr); else if (W.key === 'park') drawParkMap(dpr); else drawMallMap(dpr);
+  if (W.key === 'hotel') drawHotelMap(dpr); else if (W.key === 'park') drawParkMap(dpr); else if (W.key === 'nature') drawNatureMap(dpr); else drawMallMap(dpr);
   // characters: pink dots
   mctx.fillStyle = 'rgba(255,150,200,0.95)';
   for (const n of npcs) { const [a, b] = mapPt(n.root.position.x, -n.root.position.z); mctx.beginPath(); mctx.arc(a, b, 2.6 * dpr, 0, Math.PI * 2); mctx.fill(); }
