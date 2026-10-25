@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- BEGIN PAGE -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%E2%9C%A8%3C/text%3E%3C/svg%3E">
 <title>Aurora World</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
@@ -241,7 +242,8 @@
   @keyframes emoji-pop { 0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; } 25% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; } 60% { transform: translate(-50%, -55%) scale(1); opacity: 1; } 100% { transform: translate(-50%, -70%) scale(1); opacity: 0; } }
   .npc-toast {
     position: fixed; left: 50%; top: 30%; z-index: 12; pointer-events: none; transform: translateX(-50%);
-    background: var(--panel); border: 1px solid #ff8fb5; border-radius: 999px; padding: 8px 18px; font-size: 15px; color: var(--cream); white-space: nowrap;
+    background: var(--panel); border: 1px solid #ff8fb5; border-radius: 18px; padding: 8px 18px; font-size: 15px; color: var(--cream);
+    width: max-content; max-width: min(86vw, 520px); text-align: center; line-height: 1.5;
   }
   .npc-toast.go { animation: toast-in 2.2s ease forwards; }
   @keyframes toast-in { 0% { opacity: 0; transform: translate(-50%, 8px); } 12%, 80% { opacity: 1; transform: translate(-50%, 0); } 100% { opacity: 0; transform: translate(-50%, -6px); } }
@@ -382,7 +384,7 @@
       <dt>左半邊拖曳</dt><dd>行走（推到底會快跑）</dd>
       <dt>右半邊拖曳</dt><dd>轉動視角</dd>
       <dt>傳送 / 搭乘 / 坐下</dt><dd>走到傳送門、遊樂設施入口、椅子或電梯門前，點畫面中間出現的按鈕</dd>
-      <dt>下方按鈕</dt><dd>傳送門、快速傳送（各區域）和設定（角色、第一／第三人稱、地圖、飛行模式、畫質、說明）</dd>
+      <dt>下方按鈕</dt><dd>傳送門、快速傳送（各區域）和設定（角色、第一／第三人稱、地圖、飛行模式、白天／夜晚、畫質、說明）</dd>
     </dl>
     <button id="btn-enter" class="enter" type="button">開始探索</button>
   </div>
@@ -443,6 +445,7 @@
     <button id="btn-view" class="tool" type="button" aria-pressed="false" title="切換第一／第三人稱（V）">第一人稱</button>
     <button id="btn-map" class="tool" type="button">地圖</button>
     <button id="btn-fly" class="tool" type="button" aria-pressed="false">步行</button>
+    <button id="btn-night" class="tool" type="button" aria-pressed="false" title="切換白天／夜晚（N）">白天</button>
     <button id="btn-quality" class="tool" type="button">高畫質</button>
     <button id="btn-help" class="tool" type="button">說明</button>
   </div>

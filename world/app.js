@@ -74,17 +74,17 @@ const WORLDS = {
     base: 'nature/viewer/scene/', prefix: 'nature_', has: ['mapdata'], walk: 2.6, run: 6.5, fly: 10.0,
     sun: { phi: 48, theta: -35, power: 4.2 }, env: 0.42, hemi: 0.36, fog: [0xcddde4, 240, 950],
     lightRange: { Campfire: 16 }, lightDist: 10,
-    map: { x0: -42, x1: 74, y0: -104, y1: 100 },
+    map: { x0: -100, x1: 100, y0: -138, y1: 130 },
     portal: { p: [-25.0, -91.0, 0.15], yaw: -Math.PI / 2, arriveYaw: 0 },
     places: [
       { key: '1', zh: '入口廣場', en: 'Entrance Plaza', p: [-12, -93, 0.15], yaw: 0 },
-      { key: '2', zh: '森林步道', en: 'Forest Trail', p: [-17, -40, 1.15], yaw: 0 },
-      { key: '3', zh: '溪流木橋', en: 'Creek Bridge', p: [-7.0, -21.2, 1.35], yaw: -Math.PI / 2 },
-      { key: '4', zh: '瀑布觀景台', en: 'Falls Deck', p: [-12.0, 78.5, 3.4], yaw: -0.69 },
-      { key: '5', zh: '瀑布水潭', en: 'Falls Pool', p: [-6.0, 75.0, 2.95], yaw: -0.35 },
+      { key: '2', zh: '西峰觀景台', en: 'West Lookout', p: [-85.9, 20.1, 22.9], yaw: -1.707 },
+      { key: '3', zh: '遊客中心', en: 'Visitor Center', p: [-23.5, 6.0, 1.82], yaw: Math.PI / 2 },
+      { key: '4', zh: '翠谷吊橋', en: 'Valley Bridge', p: [-0.6, 64.0, 20.6], yaw: -1.535 },
+      { key: '5', zh: '瀑布水潭', en: 'Falls Pool', p: [-7.2, 69.4, 2.55], yaw: -0.487 },
       { key: '6', zh: '豪華露營區', en: 'Glamping Meadow', p: [29.5, -4.0, 1.7], yaw: -0.97 },
-      { key: '7', zh: '鐘型帳篷', en: 'Bell Tent', p: [34.6, 8.0, 1.98], yaw: Math.PI / 2 },
-      { key: '8', zh: '露營車', en: 'Camper Van', p: [38.5, -12.4, 2.25], yaw: 2.0 },
+      { key: '7', zh: '南峰觀景台', en: 'South Lookout', p: [-0.1, -126.8, 22.9], yaw: 0 },
+      { key: '8', zh: '東峰觀景台', en: 'East Lookout', p: [87.0, 9.7, 22.45], yaw: 1.636 },
       { key: '9', zh: '營火區', en: 'Campfire', p: [47.0, 1.0, 1.7], yaw: 0 },
       { key: '0', zh: '營地服務台', en: 'Camp Office', p: [24.5, -10.5, 1.63], yaw: -Math.PI / 2 },
     ],
@@ -209,13 +209,50 @@ function placeSun(p, force = false) {
   sun.target.updateMatrixWorld();
   renderer.shadowMap.needsUpdate = true;
 }
+// night mode: a dark sky with stars and a moon, faint blue moonlight, and every lamp in
+// the world turned up (they keep their glow, the sun no longer drowns it)
+let night = false;
+try { night = localStorage.getItem('aurora-world-night') === '1'; } catch { }
+let nightK = 1;                          // how much brighter the lamps' point lights are
+const NIGHT_SKY = new THREE.Color(0x060c1e);
+const skyDome = new THREE.Group();       // stars and moon, kept centred on the camera
+skyDome.visible = false;
+scene.add(skyDome);
+{
+  const n = 1400, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const y = 0.05 + 0.95 * Math.random() ** 0.7, a = Math.random() * Math.PI * 2, r = Math.sqrt(1 - y * y);
+    pos.set([Math.cos(a) * r * 1000, y * 1000, Math.sin(a) * r * 1000], i * 3);
+    const b = 0.5 + Math.random() * 0.5, warm = Math.random() < 0.2;
+    col.set([b, b * (warm ? 0.9 : 0.97), b * (warm ? 0.75 : 1.0)], i * 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  skyDome.add(new THREE.Points(g, new THREE.PointsMaterial({ size: MOBILE ? 2.2 : 1.8, sizeAttenuation: false, vertexColors: true, fog: false, depthWrite: false })));
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(22, 24, 16), new THREE.MeshBasicMaterial({ color: 0xfff4d6, fog: false }));
+  moon.name = 'Moon';
+  skyDome.add(moon);
+}
 function applyLook(w) {
   sunDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(w.sun.phi), THREE.MathUtils.degToRad(w.sun.theta));
   su.sunPosition.value.copy(sunDir);
-  sun.intensity = w.sun.power;
-  scene.environmentIntensity = w.env;
-  hemi.intensity = w.hemi;
-  scene.fog = w.fog ? new THREE.Fog(...w.fog) : null;
+  sky.visible = !night;
+  skyDome.visible = night;
+  skyDome.getObjectByName('Moon').position.copy(sunDir).multiplyScalar(950);
+  scene.background = night ? NIGHT_SKY : null;
+  sun.color.set(night ? 0x8fa6e8 : 0xfff0d8);
+  sun.intensity = w.sun.power * (night ? 0.09 : 1);
+  scene.environmentIntensity = w.env * (night ? 0.16 : 1);
+  hemi.color.set(night ? 0x34457a : 0xe4ecff);
+  hemi.groundColor.set(night ? 0x16140e : 0x847e5e);
+  hemi.intensity = w.hemi * (night ? 0.9 : 1);
+  scene.fog = w.fog ? new THREE.Fog(night ? 0x0a1326 : w.fog[0], w.fog[1], w.fog[2]) : null;
+  nightK = night ? 2.0 : 1;
+  if (typeof bloom !== 'undefined') bloom.strength = night ? 0.5 : 0.32;
+  renderer.shadowMap.needsUpdate = true;
+  const b = document.getElementById('btn-night');
+  if (b) { b.textContent = night ? '夜晚' : '白天'; b.setAttribute('aria-pressed', String(night)); }
 }
 
 // ---------------------------------------------------------------------------
@@ -520,7 +557,7 @@ function updateLightPool(dt) {
   }
   const k = 1 - Math.exp(-dt * 6);
   for (const l of POOL) {
-    const target = l.userData.src ? l.userData.src.intensity : 0;
+    const target = l.userData.src ? l.userData.src.intensity * nightK : 0;
     l.intensity += (target - l.intensity) * k;
   }
 }
@@ -1389,6 +1426,40 @@ const CHARACTERS = [
       { via: [[-3.5, 7.6], [-8.9, 8.0]], seat: [-10.05, 8.0], h: 0.5 },
     ],
   },
+  // Starlight Kingdom's mascot: 虎寶 the tiger, just inside the gate on Main Street
+  {
+    id: 'tiger', world: 'park', zh: '虎寶', en: 'Kingdom Tiger', role: '童話王國吉祥物', mascot: true, lookUp: 0.15, lookSide: 0.35,
+    file: 'characters/park_tiger/park_tiger.gltf.json', p: [4.0, -91.5, 0.05], face: [4.0, -112.0], height: 1.9, gap: 2.4,   // her coat and tail need room
+    hello: '吼～歡迎來到星光童話王國！我是王國的吉祥物虎寶 🐯 今天想先玩哪一個呢？',
+    again: '還想知道什麼？王國裡的事，虎寶全部都知道喔！',
+    idles: ['nod', 'look', 'yay'],
+    menu: [
+      {
+        label: '介紹童話王國', lines: [
+          '從大門直直往前走就是童話大街，兩邊都是可愛的小店 🏰',
+          '大街走到底是星光廣場，正中央有一座星星噴泉，再往後就是星光城堡！',
+          '西邊有旋轉木馬和瘋狂茶杯，東邊是摩天輪和天鵝湖，城堡後面還有飛龍雲霄飛車 🎢',
+        ],
+      },
+      { label: '帶我去…', guide: true },
+      {
+        label: '推薦好玩的', lines: [
+          '第一次來的話，虎寶推薦先坐摩天輪，從最上面可以看到整座王國！🎡',
+          '膽子大一點就去坐飛龍雲霄飛車，虎寶每次都坐最前面那排，吼～～',
+        ], trips: [
+          { label: '去摩天輪', line: '摩天輪到了！坐到最上面記得往城堡那邊看 🎡', p: [44.0, 10.0, 0.04], yaw: -Math.PI / 2 },
+          { label: '去雲霄飛車', line: '飛龍雲霄飛車到了，抓緊扶手喔！🐉', p: [-20.0, 76.0, 0.04], yaw: 0 },
+          { label: '去旋轉木馬', line: '旋轉木馬到了～虎寶最喜歡那隻金色的馬 🎠', p: [-34.1, 5.7, 0.04], yaw: 1.406 },
+        ],
+      },
+      { label: '售票處在哪', lines: ['大門左手邊那間小屋就是售票處，米雅姊姊在裡面上班喔！', '米露常常在星光廣場的噴泉旁邊巡邏，看到她可以打招呼～'] },
+      { label: '你認識奧蘿拉熊嗎？', lines: ['當然！她是 Grand Aurora 大飯店的吉祥物，我們是好朋友 🐻🐯', '她說飯店的蛋糕最好吃，虎寶說童話大街的棉花糖比較好吃……我們每次都吵這個，嘿嘿。'] },
+      { label: '再見 👋', bye: ['掰掰～玩得開心，有需要再來大門口找虎寶！🐯'] },
+    ],
+    pats: ['吼嚕嚕～好舒服 ♡', '虎寶的毛是不是很蓬？', '再摸一下下～ ♡', '嘿嘿，帽子不要弄歪喔！🎩'],
+    // little strolls on Main Street, just inside the gate
+    outings: [{ via: [[2.0, -89.0]] }, { via: [[6.0, -89.5]] }, { via: [[4.0, -87.0]] }],
+  },
   // Hotel staff: Tripo robots in uniform. They bow instead of waving.
   ...[
     {
@@ -1522,25 +1593,69 @@ const CHARACTERS = [
         { label: '再見', bye: ['掰掰～ 要再來玩喔！'] },
       ],
     },
-    // ... and at Emerald Valley: 米雅 at the camp office, 米露 round the camp fire
+    // ... and at Emerald Valley: 米雅 at the lodge's visitor desk, 米露 at the camp office
     {
-      id: 'nature_desk', world: 'nature', en: 'Camp Staff', zh: '米雅', role: '營地服務台 · 姊姊', p: [29.9, -10.5, 1.82], face: [20.0, -10.5], reach: 3.6,
-      // behind the camp office counter (the staff door is in the north wall), and a rest on her chair
-      outings: [{ via: [[29.9, -8.6]] }, { via: [[29.9, -12.6]] }, { via: [[30.3, -12.2]], seat: [30.9, -12.2], h: 0.54, face: [27.0, -12.2] }],
+      id: 'nature_desk', world: 'nature', en: 'Visitor Center', zh: '米雅', role: '遊客中心 · 姊姊', p: [-29.7, -1.05, 2.0], face: [-29.7, 6.0], reach: 3.6,
+      // behind the visitor desk (open at both ends), a stroll to either end and a rest on her chair
+      outings: [{ via: [[-27.5, -1.05]] }, { via: [[-31.7, -1.05]] }, { via: [[-29.9, -1.25]], seat: [-30.55, -1.25], h: 0.54, face: [-30.55, 6.0] }],
       file: 'characters/staff_robot/staff_robot.gltf.json',
-      hello: '歡迎來到翠谷自然公園！我是營地服務台的米雅，今天要入住露營區嗎？',
+      hello: '歡迎來到翠谷自然公園！我是遊客中心的米雅，一樓是森林咖啡廳，二樓有伴手禮店喔～',
       menu: [
         {
-          label: '園區導覽 🗺️', lines: ['步道沿著溪流一路往北，走到底就是瀑布和水潭，觀景台在水潭西邊。', '過了木橋就是我們的豪華露營區：鐘型帳篷、露營車和營火區都在這片草地上。想去哪裡，我直接送您過去 ✨'], trips: [
-            { label: '瀑布觀景台', line: '瀑布到了，水氣很涼，小心台階喔 🌊', p: [-12.0, 78.5, 3.4], yaw: -0.69 },
+          label: '園區導覽 🗺️', lines: ['步道沿著溪流一路往北，走到底就是瀑布和水潭，吊橋從山谷西邊跨到東邊。', '溪的東邊是豪華露營區，帳篷、露營車、小木屋和營火區都在那裡。想去哪裡，我直接送您過去 ✨'], trips: [
+            { label: '瀑布水潭', line: '瀑布到了，水氣很涼，水潭邊的石頭有點滑，小心喔 🌊', p: [-7.2, 69.4, 2.55], yaw: -0.487 },
+            { label: '翠谷吊橋', line: '吊橋到了！從山谷的西邊一直連到東邊，橋中間看瀑布最漂亮 🌉', p: [-0.6, 64.0, 20.6], yaw: -1.535 },
             { label: '溪流木橋', line: '木橋到了，可以站在中間聽溪水的聲音 🌿', p: [-7.0, -21.2, 1.35], yaw: -Math.PI / 2 },
+            { label: '環山步道口', line: '步道口就在傳送門旁邊，先之字形爬上西邊的山，再繞整座山谷一圈，沿路有三座觀景台 ⛰️', p: [-36.5, -94.3, 0.15], yaw: Math.PI / 2 },
+            { label: '豪華露營區', line: '露營區到了，服務台的米露會幫您辦入住 🏕️', p: [24.5, -10.5, 1.63], yaw: -Math.PI / 2 },
             { label: '營火區', line: '營火區到了，晚上大家會在這裡烤棉花糖 🔥', p: [47.0, 1.0, 1.7], yaw: 0 },
           ],
         },
         {
-          label: '我要入住 🏕️', lines: ['我們有鐘型帳篷和露營車兩種。帳篷裡有雙人床和小沙發，露營車有床、小廚房、餐桌，還有自己的衛浴。', '今天兩種都還有空位，想先看看哪一種呢？'], trips: [
+          label: '森林咖啡廳 ☕', lines: ['一樓北邊就是森林咖啡廳，有手沖咖啡、拿鐵、熱可可和花草茶。', '玻璃櫃裡有每天現烤的可頌、草莓蛋糕和巧克力蛋糕，可以坐在窗邊慢慢吃～'], trips: [
+            { label: '去點一杯', line: '櫃檯在這裡，推薦森林拿鐵配草莓蛋糕 🍰', p: [-33.2, 6.5, 2.0], yaw: 0 },
+          ],
+        },
+        {
+          label: '伴手禮 🎁', lines: ['二樓東邊是伴手禮店，有翠谷蜂蜜、森林餅乾禮盒、花草茶、馬克杯、明信片和小熊娃娃。', '樓梯在櫃檯旁邊，靠南邊的牆往上走就到了。'], trips: [
+            { label: '帶我上二樓', line: '伴手禮店到了，結帳櫃檯在窗邊 🧸', p: [-31.5, 0.9, 5.8], yaw: 0 },
+          ],
+        },
+        {
+          label: '室內活動 🎲', lines: ['二樓西邊是活動室，有桌遊、手作材料和一整面書櫃，下雨天也能玩一整天。', '一樓的壁爐沙發區也很舒服，冬天會生火喔 🔥'], trips: [
+            { label: '去活動室', line: '活動室到了，桌遊都放在書櫃旁邊，自己拿來玩就好 🎲', p: [-39.0, 6.0, 5.8], yaw: Math.PI / 2 },
+            { label: '去壁爐旁坐坐', line: '壁爐這邊最暖和了，沙發隨便坐 🛋️', p: [-39.5, 6.0, 2.0], yaw: Math.PI / 2 },
+          ],
+        },
+        {
+          label: '我想入住露營區', lines: ['露營區的入住是米露負責的，她在溪對面的營地服務台。', '我們有鐘型帳篷、露營車和小木屋三種，米露會帶您挑喔～'], trips: [
+            { label: '去營地服務台', line: '營地服務台到了，米露就在櫃檯後面 😊', p: [24.5, -10.5, 1.63], yaw: -Math.PI / 2 },
+          ],
+        },
+        { label: '妳也在這裡？', lines: ['是呀，這座自然公園新開幕，我在遊客中心，米露在露營區。', '有任何園區的問題都可以來問我 😊'] },
+        { label: '一起拍照 📸', photo: true },
+        { label: '再見', bye: ['祝您在翠谷玩得開心，晚上記得看星星喔！'] },
+      ],
+    },
+    {
+      id: 'nature_floor', world: 'nature', en: 'Camp Staff', zh: '米露', role: '營地服務台 · 妹妹', p: [29.9, -10.5, 1.82], face: [20.0, -10.5], reach: 3.6,
+      // behind the camp office counter (the staff door is in the north wall), and a rest on her chair
+      outings: [{ via: [[29.9, -8.6]] }, { via: [[29.9, -12.6]] }, { via: [[30.3, -12.2]], seat: [30.9, -12.2], h: 0.54, face: [27.0, -12.2] }],
+      file: 'characters/staff_lulu/staff_lulu.gltf.json',
+      hello: '嗨～歡迎來露營！我是營地服務台的米露，今天要入住嗎？🏕️',
+      menu: [
+        {
+          label: '我要入住 🏕️', lines: ['我們有鐘型帳篷、露營車和小木屋三種。帳篷裡有雙人床和小沙發，露營車有床、小廚房、餐桌，還有自己的衛浴。', '不想睡在野外的話，露營車後面有兩排小木屋，有實木牆和真正的床。想先看看哪一種呢？'], trips: [
             { label: '看鐘型帳篷', line: '這是 1 號帳篷，床邊有小檯燈，躺下來可以看到帳篷頂 ⛺', p: [34.6, 8.0, 1.98], yaw: Math.PI / 2 },
             { label: '看露營車', line: '這是 1 號露營車，餐桌可以收成床，冰箱裡有冰牛奶 🚐', p: [38.5, -12.4, 2.25], yaw: 2.0 },
+            { label: '看小木屋', line: '這是 1 號小木屋，雙人床、床頭燈、單人沙發都有，門廊還有兩張椅子可以看星星 🛖', p: [37.3, -20.9, 2.07], yaw: 0 },
+          ],
+        },
+        {
+          label: '露營區有什麼？', lines: ['營火區在帳篷圍成的圓圈中間，晚上我們會一起烤棉花糖 🔥', '服務台旁邊有休息室，有沙發和暖爐，走累了可以進去坐坐～'], trips: [
+            { label: '去營火區', line: '找個木頭椅子坐下，火很溫暖喔 🔥', p: [47.0, 1.0, 1.7], yaw: 0 },
+            { label: '去休息室', line: '休息室到了，沙發隨便坐 🛋️', p: [26.6, -17.6, 1.72], yaw: -Math.PI / 2 },
+            { label: '去瀑布', line: '瀑布到了！水潭好大，站在這裡就能感覺到水氣 📸', p: [-7.2, 69.4, 2.55], yaw: -0.487 },
           ],
         },
         {
@@ -1548,28 +1663,17 @@ const CHARACTERS = [
             { label: '帶我過去', line: '盥洗室到了，左邊男生、右邊女生 🚻', p: [64.0, 20.4, 1.7], yaw: 0 },
           ],
         },
-        { label: '露營注意事項', lines: ['營火只在營火區生，熄燈時間是晚上十點。', '溪水很乾淨但很冰，下水的時候請注意安全 🙏'] },
-        { label: '妳也在這裡？', lines: ['是呀，這座自然公園新開幕，我和米露輪流過來幫忙。', '米露在營火區那邊，穿紅色制服的就是她 😊'] },
-        { label: '一起拍照 📸', photo: true },
-        { label: '再見', bye: ['祝您在翠谷玩得開心，晚上記得看星星喔！'] },
-      ],
-    },
-    {
-      id: 'nature_floor', world: 'nature', en: 'Camp Staff', zh: '米露', role: '露營區服務員 · 妹妹', p: [52.5, 8.0, 1.7], face: [47.0, 8.0],
-      file: 'characters/staff_lulu/staff_lulu.gltf.json',
-      patrol: [[52.5, 8.0], [50.9, 11.9], [47.0, 13.5], [43.1, 11.9], [41.5, 8.0], [43.1, 4.1], [47.0, 2.5], [50.9, 4.1]],
-      hello: '嗨～歡迎來露營！我是露營區服務員米露 🏕️',
-      menu: [
-        {
-          label: '有什麼好玩的？', lines: ['一定要去看瀑布！水從石壁上沖下來，水潭邊超涼快 🌊', '晚上的營火也很棒，我們會一起烤棉花糖～'], trips: [
-            { label: '去瀑布', line: '瀑布到了！站在觀景台上看最清楚 📸', p: [-12.0, 78.5, 3.4], yaw: -0.69 },
-            { label: '去營火區', line: '找個木頭椅子坐下，火很溫暖喔 🔥', p: [47.0, 1.0, 1.7], yaw: 0 },
+        { label: '有登山步道嗎？', lines: ['有喔！露營車後面就有一塊 RIDGE TRAIL 的牌子，從那裡爬上東邊的山，就能接上繞整座山谷一圈的環山步道 ⛰️', '傳送門旁邊也有另一個入口。西邊、南邊、東邊各有一座觀景台，都有長椅可以坐著看風景！'], trips: [
+            { label: '去步道口', line: '步道口到了，慢慢走，記得補充水分喔 💧', p: [68.0, -4.6, 1.75], yaw: -Math.PI / 2 },
           ],
         },
-        { label: '帳篷和露營車哪個好？', lines: ['帳篷比較有露營的感覺，躺著可以聽到外面的蟲叫聲 🦗', '露營車比較方便，有廚房和洗手間，下雨也不怕！'] },
-        { label: '洗手間在哪？', lines: ['帳篷區北邊那棟木屋就是盥洗室，有廁所也有淋浴間 🚿', '洗完澡來營火區烤火，頭髮一下子就乾了～'] },
+        { label: '露營注意事項', lines: ['營火只在營火區生，熄燈時間是晚上十點。', '溪水很乾淨但很冰，下水的時候請注意安全 🙏'] },
         { label: '森林裡有動物嗎？', lines: ['早上常常有松鼠跑來營地偷吃東西 🐿️', '溪裡還有小魚和螃蟹，不過要看仔細一點才找得到～'] },
-        { label: '姊姊在哪裡？', lines: ['米雅姊姊在入口這邊的營地服務台，有什麼問題都可以問她！'] },
+        {
+          label: '姊姊在哪裡？', lines: ['米雅姊姊在溪西邊的翠谷木屋，那裡是遊客中心，一樓有咖啡廳、二樓有伴手禮店！'], trips: [
+            { label: '去遊客中心', line: '翠谷木屋到了，米雅姊姊就在門口右手邊的櫃檯 😊', p: [-23.5, 6.0, 1.82], yaw: Math.PI / 2 },
+          ],
+        },
         { label: '一起拍照 📸', photo: true },
         { label: '再見', bye: ['掰掰～ 晚上記得來營火區喔！'] },
       ],
@@ -1743,16 +1847,18 @@ const ACTS = {
   spin: { dur: 1.4, L: [[0.9, 0.25, 0.2], [0.9, 0.3, 0.1]], R: [[0.9, 0.25, 0.2], [0.9, 0.3, 0.1]] },
   yay: { dur: 1.8, R: [[0.35, 0.85, 0.35], [0.1, 1, 0.1]], at: 0.4 },
   shake: { dur: 2.0, R: [[0.15, -0.45, 0.85], [0.05, -0.1, 1]], at: 0.5 },
+  roar: { dur: 1.8, L: [[0.55, 0.55, 0.6], [0.25, 0.75, 0.6]], R: [[0.55, 0.55, 0.6], [0.25, 0.75, 0.6]], at: 0.5 },
 };
 // 互動: every character can high-five and hug; each also has a few of her own.
 // The sisters only play while keeping you company (at work they stay formal).
 const PLAY = {
   base: (who) => [
-    { label: '擊掌 ✋', act: 'highfive', lines: { bear: '耶～擊掌成功！✋ 你今天也很棒喔！', mia: '擊掌……這樣嗎？✋ 呵呵，有點不好意思呢。', milu: '耶～！✋ 再一次再一次！' }[who] },
-    { label: '抱抱 🤗', act: 'hug', lines: { bear: '抱抱～ 謝謝你來 Grand Aurora，要玩得開心喔！💕', mia: '……被抱住了。謝謝您，感覺很溫暖。', milu: '抱抱！嘿嘿，你是今天第一個抱我的人 💕' }[who] },
-    { label: '握手 🤝', act: 'shake', lines: { bear: '握握手～ 熊掌是不是軟軟的？🐾', mia: '請多指教。能陪您走這一趟，是我的榮幸。', milu: '握手握手～ 我們是好朋友了！🤝' }[who] },
+    { label: '擊掌 ✋', act: 'highfive', lines: { tiger: '耶～虎掌擊掌！✋ 力氣有沒有很大？', bear: '耶～擊掌成功！✋ 你今天也很棒喔！', mia: '擊掌……這樣嗎？✋ 呵呵，有點不好意思呢。', milu: '耶～！✋ 再一次再一次！' }[who] },
+    { label: '抱抱 🤗', act: 'hug', lines: { tiger: '大大的抱抱！虎寶的毛暖不暖？💕', bear: '抱抱～ 謝謝你來 Grand Aurora，要玩得開心喔！💕', mia: '……被抱住了。謝謝您，感覺很溫暖。', milu: '抱抱！嘿嘿，你是今天第一個抱我的人 💕' }[who] },
+    { label: '握手 🤝', act: 'shake', lines: { tiger: '握手～虎掌肉球軟不軟？🐾', bear: '握握手～ 熊掌是不是軟軟的？🐾', mia: '請多指教。能陪您走這一趟，是我的榮幸。', milu: '握手握手～ 我們是好朋友了！🤝' }[who] },
   ],
   bear: [{ label: '摸摸頭 🐻', pat: true }],
+  tiger: [{ label: '摸摸頭 🐯', pat: true }, { label: '虎虎吼 🐾', act: 'roar', lines: '吼～～！嚇到了嗎？嘿嘿，虎寶其實很溫柔的啦 🐯' }],
   mia: [
     { label: '鞠躬回禮 🙇', act: 'bow', lines: '承蒙照顧了。今後也請多多關照。' },
   ],
@@ -1760,7 +1866,7 @@ const PLAY = {
     { label: '轉圈圈 💫', act: 'spin', lines: '看我轉～！好暈好暈……嘿嘿 💫' },
   ],
 };
-const playItems = (n) => (n.c.person === 'bear' || n.follow ? [...PLAY.base(n.c.person), ...(PLAY[n.c.person] || [])] : [])
+const playItems = (n) => (n.c.person === 'bear' || n.c.mascot || n.follow ? [...PLAY.base(n.c.person), ...(PLAY[n.c.person] || [])] : [])
   .filter((m) => !(sit.seat && (m.act === 'spin' || m.act === 'hug')));   // seated: no spinning or hugging
 const LAP_ARMS = [[0.12, -0.8, 0.55], [0.05, -0.55, 0.85]];   // seated: relaxed, hands resting on the knees
 const HUG_OPEN = [[0.95, 0.1, 0.55], [0.6, 0.1, 0.9]], HUG_CLOSE = [[0.45, 0.0, 1.0], [-0.9, 0.05, 0.5]];
@@ -1828,31 +1934,148 @@ function updateOuting(n, dt) {
 // pops up beside you after a lift, a teleport or a flight, sits on a free seat next to
 // yours, and talks differently. One companion at a time; her own post stays empty
 // while she is out with you, and the choice survives a reload.
-const PERSON_OF = { bear: 'bear', staff_desk: 'mia', mall_desk: 'mia', park_desk: 'mia', nature_desk: 'mia', staff_lobby: 'milu', mall_floor: 'milu', park_floor: 'milu', nature_floor: 'milu' };
+const PERSON_OF = { bear: 'bear', tiger: 'tiger', staff_desk: 'mia', mall_desk: 'mia', park_desk: 'mia', nature_desk: 'mia', staff_lobby: 'milu', mall_floor: 'milu', park_floor: 'milu', nature_floor: 'milu' };
 const COMPANION = {
   bear: {
-    start: '好呀！今天我就陪你逛逛 🐻💕 走吧走吧～', hello: '要去哪裡玩呢？我跟著你～ 🐾', again: '還想做什麼呢？',
-    bye: '那我先回去囉，今天好開心！有需要再來找我 👋', where: '這裡是{place}喔！我們一起逛逛吧～',
-    chat: [['你知道嗎？我最喜歡飯店的空中酒吧，晚上的星星超漂亮 ✨'], ['走路的時候我會偷偷數步數……剛剛數到 128 步！🐾'],
-      ['米雅和米露是一對姊妹，我們三個常常一起吃午餐喔～'], ['如果你累了，我們找張椅子坐坐，我陪你一起坐 💺']],
+    start: '好耶！今天你是我的了……我是說，我陪你逛 🐻💕 走吧走吧～', hello: '要去哪裡玩呢？我跟著你，不准把我弄丟喔 🐾', again: '還想做什麼呢？我都可以喔～',
+    bye: '嗚……那我先回去囉。今天超開心的，下次還要找我喔！說好了！👋', where: '這裡是{place}喔！我們一起逛逛，順便找找有沒有好吃的～',
+    chat: [
+      ['你知道嗎？我最喜歡飯店的空中酒吧，晚上的星星超漂亮 ✨', '雖然我不能喝酒……但是我可以點熱可可！上面還有棉花糖 ☁️'],
+      ['走路的時候我會偷偷數步數……', '剛剛數到 128 步！然後就忘記數到哪裡了 🐾'],
+      ['米雅和米露是一對姊妹，我們三個常常一起吃午餐喔～', '米露每次都偷吃我的布丁，米雅就會念她，好好笑 🍮'],
+      ['如果你累了就說喔，我們找張椅子坐坐。', '我很會找椅子的，這是我的專長 💺✨'],
+      ['你覺得我的女僕裝可愛嗎？', '這是米雅幫我挑的，裙子上的蝴蝶結是我自己選的喔 🎀'],
+      ['跟你說一個秘密……', '我其實很怕打雷。上次打雷，我躲在櫃檯下面躲了好久，米雅都找不到我 ⛈️'],
+      ['我的尾巴會搖喔！', '開心的時候就會一直搖，現在就在搖～你有看到嗎？🐻'],
+      ['如果可以的話，我想要一個超大的蜂蜜蛋糕當生日禮物。', '大到可以整隻熊躺上去的那種 🍯🎂'],
+      ['你喜歡抱抱嗎？', '我覺得世界上最棒的東西就是抱抱跟點心了，兩個一起來更棒 💕'],
+      ['有時候我會想，客人們回家以後會不會想念我們……', '你會想我嗎？會嗎？要說會喔 🥺'],
+    ],
+    world: {
+      hotel: [['飯店的地毯好軟，走起來好像踩在雲上 ☁️', '我有時候會偷偷在上面打滾，不要告訴別人喔！'], ['總統套房的床超大！', '我偷偷躺過一次……只有一下下！真的只有一下下！🛏️']],
+      park: [['童話王國的旋轉木馬我最喜歡了！', '我每次都選那隻白色的馬，因為牠看起來最溫柔 🎠'], ['城堡裡面好像住著公主耶……', '你覺得公主會不會也想要一隻熊當朋友？🏰']],
+      mall: [['購物中心的冰淇淋店有蜂蜜口味！', '我每次經過都要用很大的意志力才能走過去 🍦'], ['玩具店裡有跟我長得很像的娃娃！', '可是我覺得我比較可愛……你說對不對？🧸']],
+      nature: [['森林裡的空氣好香喔，有樹的味道～', '深呼吸！吸～～～呼～～～ 🌲'], ['晚上的營火可以烤棉花糖！', '我烤的每一顆都會燒焦，所以都是米露幫我烤的 🔥']],
+    },
+    spots: [
+      [/泳池/, ['水看起來好涼！可是熊的毛弄濕會變很重……我在旁邊看你游就好 🏊']], [/健身房/, ['健身房……我舉過一次啞鈴，然後就跌倒了 🏋️']],
+      [/咖啡/, ['咖啡廳！有蛋糕的味道！我們可以坐一下嗎？可以嗎？☕🍰']], [/自助餐/, ['自助餐！我可以每一樣都拿一點點嗎……一點點而已 🍽️']],
+      [/酒吧/, ['好有氣氛喔～我點一杯熱可可就好 🍫']], [/套房/, ['哇～這裡好豪華！我可以在床上跳一下嗎？🛏️']],
+      [/旋轉木馬/, ['旋轉木馬！要不要一起坐？我要白色那隻！🎠']], [/茶杯/, ['茶杯轉太快的話我會頭暈……可是好好玩 ☕🌀']],
+      [/摩天輪/, ['坐到最上面的時候，可以看到整個王國喔！🎡']], [/雲霄飛車/, ['雲、雲霄飛車……你要坐嗎？我、我在下面幫你加油就好 😣']],
+      [/冰淇淋/, ['冰淇淋店……蜂蜜口味在呼喚我 🍦']], [/玩具/, ['玩具店！你看你看，那個熊娃娃是不是很像我！🧸']],
+      [/營火/, ['營火暖暖的～我們坐近一點好不好？🔥']], [/瀑布/, ['瀑布好大聲！你說什麼？我聽不到啦～🌊']],
+      [/吊橋/, ['吊、吊橋在晃！你走慢一點，等等我啦！🌉']], [/觀景台/, ['哇～～可以看到好遠！那邊那個小小的是露營區嗎？⛰️']],
+      [/伴手禮/, ['伴手禮店有小熊娃娃！要不要帶一隻回家？跟我一模一樣喔 🧸']],
+    ],
     thoughts: ['（今天走了好多路，腳腳有點痠……但是好開心 🐾）', '（{place}好像有甜甜的味道……是不是有人在烤蛋糕？）', '（不知道米雅和米露現在在做什麼呢～）',
-      '（跟你一起散步，比一個人站在大廳好多了 💕）', '（等一下要不要撒嬌討個抱抱呢……）', '（剛剛那個轉角，好像看到一隻很可愛的小鳥）'],
+      '（跟你一起散步，比一個人站在大廳好多了 💕）', '（等一下要不要撒嬌討個抱抱呢……）', '（剛剛那個轉角，好像看到一隻很可愛的小鳥）',
+      '（尾巴……尾巴又在搖了，好丟臉 🙈）', '（肚子咕嚕咕嚕叫……希望沒被聽到）', '（{place}好漂亮，好想一直待在這裡）'],
+  },
+  tiger: {
+    start: '吼！好耶，虎寶陪你玩到腳軟為止 🐯 出發！', hello: '接下來去哪裡？虎寶跟緊你，不會走丟的！', again: '還要聊什麼呢？虎寶話很多喔～',
+    bye: '那虎寶回大門口顧門囉～今天超好玩的，下次再一起逛！🐯', where: '這裡是{place}！虎寶的地盤，嘿嘿 ✌️',
+    chat: [
+      ['你知道嗎？虎寶的帽子是城堡裡的公主送的！', '她說戴上這頂帽子，就是王國正式的吉祥物了 🎩✨'],
+      ['虎寶最喜歡童話大街的棉花糖！', '粉紅色那種，一次可以吃三支……然後牙齒會黏在一起 🍭'],
+      ['奧蘿拉熊是虎寶的好朋友！', '下次帶你去大飯店找她玩，她抱起來超軟的 🐻'],
+      ['逛累了要說喔～', '虎寶知道哪裡有最好坐的長椅，就在天鵝湖旁邊，看得到天鵝 🦢'],
+      ['跟你說一個秘密……', '虎寶其實有一點點怕水。天鵝湖的船，虎寶都只敢坐在中間 😅'],
+      ['你有發現虎寶的尾巴很長嗎？', '走路的時候要小心不要掃到小朋友，這是虎寶每天的練習 🐾'],
+      ['晚上的王國會打燈喔！', '城堡上的星星會發光，整個廣場都亮晶晶的，虎寶最喜歡在噴泉前面看 ✨'],
+      ['虎寶的夢想是當雲霄飛車的領隊！', '每一班都坐最前面，然後大喊「出發～！」🎢'],
+      ['米露常常跟虎寶比賽誰轉茶杯轉得比較快。', '每次都是平手，因為兩個都轉到頭暈，忘記誰贏了 🌀'],
+      ['大家常常以為虎寶是男生……', '其實虎寶是女生喔！你看帽子上的藍色蝴蝶結，還有長長的睫毛～ 🎀'],
+      ['今天能陪你逛，虎寶好開心！', '平常只能在門口跟大家揮手，今天可以一起玩，感覺像放假一樣 💕'],
+    ],
+    world: {
+      park: [['城堡裡面其實有一間房間只有虎寶知道……', '……騙你的啦！嘿嘿，不過城堡的大階梯真的很漂亮 🏰']],
+      hotel: [['大飯店好豪華喔，地板亮到可以照鏡子！', '虎寶要小心不要滑倒……'], ['奧蘿拉熊就在這裡上班！', '等一下去大廳跟她打招呼好不好？🐻']],
+      mall: [['購物中心好大！', '虎寶想去玩具店看看有沒有老虎娃娃 🧸']],
+      nature: [['森林好安靜，虎寶好像回到老家了！', '……老虎的老家應該是森林吧？吼～ 🌲']],
+    },
+    spots: [
+      [/入口大門|城門/, ['這是虎寶平常顧的大門！每天都在這裡跟大家說歡迎光臨 🐯']], [/童話大街/, ['童話大街的棉花糖店在這附近！好香喔～ 🍭']],
+      [/星光廣場|噴泉/, ['星星噴泉！要不要許個願？虎寶每天都許願可以吃到吃不完的棉花糖 ✨']], [/城堡/, ['星光城堡！公主就住在最高的那座塔上喔 🏰']],
+      [/旋轉木馬/, ['旋轉木馬！虎寶要坐金色那隻，你要坐哪一隻？🎠']], [/茶杯/, ['茶杯！轉最快的那種！轉到頭暈才好玩 🌀']],
+      [/摩天輪/, ['摩天輪！坐到最上面的時候，可以看到整個王國喔 🎡']], [/雲霄飛車/, ['飛龍雲霄飛車！走走走，坐最前面那排！吼～ 🎢']],
+      [/天鵝湖/, ['天鵝湖好漂亮～可是虎寶不敢靠水太近……你走前面 🦢']], [/飛龍森林/, ['飛龍森林裡面好像有龍在睡覺……噓，小聲一點 🐉']],
+      [/大廳/, ['好大的水晶吊燈！虎寶第一次看到這麼亮的燈 ✨']], [/營火/, ['營火暖暖的～虎寶的毛會不會被烤焦啊 🔥']],
+    ],
+    thoughts: ['（好香……是棉花糖的味道！）', '（{place}人好多，好熱鬧～）', '（帽子有沒有戴歪呢……）',
+      '（跟你一起逛，比站在門口好玩多了！）', '（尾巴要藏好，不要掃到別人……）', '（等一下要不要去坐一次雲霄飛車……）',
+      '（{place}好漂亮，下次要帶熊熊來）', '（肚子咕嚕咕嚕叫了……）', '（今天的虎寶是不是特別可愛？帽子的蝴蝶結有綁好嗎……🎀）'],
   },
   mia: {
-    start: '好的，櫃檯先交給同事，今天由我陪您走走 😊', hello: '請問接下來想去哪裡呢？我陪您一起。', again: '還有什麼想聊的嗎？',
-    bye: '那我回崗位了，謝謝您的陪伴，祝您有美好的一天。', where: '這裡是{place}。需要的話，我可以幫您介紹附近的設施。',
-    chat: [['其實我很少離開櫃檯，能這樣走走覺得好新鮮。'], ['米露常說我太認真了……您覺得呢？'],
-      ['我最喜歡空中酒吧的夜景，下班後常常和米露一起去看。'], ['偷偷告訴您，奧蘿拉熊其實很怕打雷喔。']],
+    start: '好呀，櫃檯先交給同事。今天我就不當櫃檯小姐了，當您的嚮導兼朋友 😊', hello: '接下來想去哪裡呢？我陪您。今天什麼都可以問我，連員工八卦也可以喔。', again: '還想聊什麼呢？我今天心情很好，什麼都可以說 😊',
+    bye: '那我回崗位了……說真的，今天是我最近最開心的一天。謝謝您陪我，下次也要點名我喔 💐', where: '這裡是{place}。偷偷說，這裡是我私心推薦的地方之一喔。',
+    chat: [
+      ['其實我很少離開櫃檯，能這樣走走覺得好新鮮。', '您知道嗎，站在櫃檯的時候，我都在想客人們要去哪裡玩。今天終於換我跟著去了 ✨'],
+      ['米露常說我太認真了……', '可是如果我不認真，她就會更不認真呀！總要有一個人顧著嘛 😮‍💨', '……不過今天，我也想偷懶一下下。'],
+      ['我最喜歡空中酒吧的夜景，下班後常常和米露一起去看。', '我會點一杯無酒精的莫希多，米露每次都點最甜的那一杯，然後喝到一半就說太甜了 🍹'],
+      ['偷偷告訴您，奧蘿拉熊其實很怕打雷喔。', '上次打雷的時候，她躲在我的櫃檯底下，尾巴還露在外面 🐻'],
+      ['您覺得我說話會不會太正式？', '同事都說我講話像在念說明書……我今天努力放輕鬆一點，有沒有比較好？😅'],
+      ['我有一個小小的夢想。', '想要有一天，在飯店的咖啡廳當一天咖啡師。拉花我偷偷練過了，畫愛心已經畫得很漂亮了喔 ☕💗'],
+      ['您知道米露比我晚一年被做出來嗎？', '她剛來的時候連門都不會開，每次都撞到玻璃門。現在跑得比我還快，時間過好快呢。'],
+      ['工作的時候我要記住每一位客人的名字和喜好。', '不過今天不用記筆記，我只想好好記住和您一起逛的這一天 😊'],
+      ['您累了嗎？要不要坐一下？', '我知道每個世界最舒服的椅子在哪裡，這是櫃檯人員的秘密情報 🤫'],
+      ['如果我也能去旅行，我想去看真正的海。', '飯店泳池的水雖然很藍，但聽說真正的海會有浪的聲音……好想聽聽看。'],
+    ],
+    world: {
+      hotel: [['這間飯店的每一盞燈我都知道開關在哪裡。', '有一次停電，我閉著眼睛帶客人從 12 樓走下來，大家都嚇了一跳 💡'], ['大廳的鋼琴其實是我晚上偷偷練習的地方。', '我只會彈一首曲子，但是我彈得很好喔！🎹']],
+      park: [['童話王國是我們姊妹最喜歡的地方。', '每次換班到這裡，米露都會先跑去坐一圈旋轉木馬才肯上工 🎠'], ['城堡的晚上會打燈，非常浪漫。', '……不、不是在暗示什麼啦，只是推薦而已 🏰']],
+      mall: [['購物中心的香水店，我每次經過都會偷偷試一下。', '今天身上是不是有一點點花香？您聞得到嗎？🌸'], ['我其實很不會購物。', '每次都會站在兩件衣服前面想很久，最後米露幫我決定 😅']],
+      nature: [['在城市裡待久了，來森林真的很放鬆。', '聽，那是溪水的聲音，還有鳥叫……工作時都聽不到這些呢 🌿'], ['翠谷木屋的咖啡很好喝喔。', '我偷偷跟店員學了手沖，下次泡給您喝 ☕']],
+    },
+    spots: [
+      [/接待櫃檯/, ['這是我平常站的地方！從這邊看出去的大廳，是我每天的風景。今天換個角度看，感覺不一樣呢。']], [/挑高大廳/, ['我最喜歡大廳的水晶吊燈，晚上點起來的時候真的好美 ✨']],
+      [/咖啡/, ['咖啡廳的可頌很好吃，外酥內軟。要不要坐下來吃一個？我請客 ☕']], [/自助餐/, ['自助餐我推薦甜點區的馬卡龍塔！我都先拿甜點，這是我的小任性 🍰']],
+      [/泳池/, ['我其實不會游泳……機器人泡水會壞掉嘛。不過我很喜歡坐在池邊看水光 💧']], [/健身房/, ['米露最近說要練腹肌……機器人要怎麼練腹肌呢？😂']],
+      [/空中酒吧/, ['就是這裡！我最喜歡的夜景。我們在這邊站一下好嗎？']], [/套房/, ['總統套房平常不對外開放喔，今天是特別招待 🤫']],
+      [/城堡/, ['這座城堡我小時候……我是說剛被做出來的時候，以為真的住著公主 🏰']], [/摩天輪/, ['坐摩天輪的時候不要往下看，這是我的血淚教訓 🎡']],
+      [/香水/, ['這家香水店！我剛剛說的就是這裡。您要不要也試試看？🌸']], [/書店/, ['我喜歡看推理小說，最喜歡猜錯兇手的那一刻 📚']],
+      [/遊客中心|翠谷木屋/, ['這裡是我在翠谷的工作地點！一樓的咖啡廳很香對吧～']], [/營火/, ['營火的聲音劈哩啪啦的，好療癒 🔥']],
+      [/吊橋/, ['吊橋上看瀑布最漂亮了……不過，可以讓我扶著欄杆嗎？有一點點高 😅']], [/觀景台/, ['風好舒服……工作時從來沒機會這樣吹風 🍃']],
+    ],
     thoughts: ['（櫃檯現在不知道忙不忙……米露應該應付得來吧。）', '（{place}的燈光很柔和，下次可以推薦給客人。）', '（能這樣慢慢走，好像在放假一樣。）',
-      '（領巾有沒有歪掉呢……）', '（客人看起來很開心，太好了。）', '（今天的晚霞應該會很漂亮。）'],
+      '（領巾有沒有歪掉呢……）', '（客人看起來很開心，太好了。）', '（今天的晚霞應該會很漂亮。）',
+      '（剛剛那句話會不會太多嘴了……算了，今天就放輕鬆吧。）', '（{place}……下次休假一定要再來。）', '（好想把今天的事情寫進日記裡 📔）'],
   },
   milu: {
-    start: '耶！可以偷懶……我是說，陪你逛逛 ✨ 出發！', hello: '下一站去哪裡？我跟著你喔～', again: '還要聊什麼呢？',
-    bye: '好吧……那我回去工作了，下次再一起玩！掰掰～', where: '這裡是{place}！我超熟的，問我準沒錯 😎',
-    chat: [['你知道嗎？姊姊在櫃檯常常偷看我巡邏 👀'], ['我最喜歡購物中心的玩具店，每次經過都想進去！'],
-      ['走累了要說喔，找張椅子坐下，我陪你一起坐～'], ['奧蘿拉熊抱起來超級軟的，你抱過了嗎？🧸']],
-    thoughts: ['（嘿嘿，偷懶成功 ✌️ 姊姊應該沒發現吧？）', '（{place}好像很好玩，下次休假再來！）', '（肚子有點餓了……等一下去吃點心好了。）',
-      '（要是能一直這樣逛下去就好了～）', '（剛剛那家店的櫥窗好可愛！）', '（走路的時候哼歌，會不會被聽到啊……）'],
+    start: '耶！可以光明正大偷懶……我是說，陪你逛逛 ✨ 出發出發！', hello: '下一站去哪裡？快說快說，我超興奮的！', again: '還要聊什麼？我話很多喔，你確定嗎 😆',
+    bye: '蛤～這麼快……好啦，我回去工作了。下次一定還要找我喔，不准找姊姊！開玩笑的啦 😜 掰掰～', where: '這裡是{place}！我超熟的，哪裡好玩哪裡好吃問我準沒錯 😎',
+    chat: [
+      ['你知道嗎？姊姊在櫃檯常常偷看我巡邏 👀', '她以為我不知道，可是她的天線會跟著我轉，超明顯的啦！'],
+      ['我最喜歡購物中心的玩具店，每次經過都想進去！', '上次我偷偷買了一個扭蛋，扭到跟我長得一模一樣的公仔，超級驚喜 ✨'],
+      ['走累了要說喔～', '不過我是機器人不會累，我可以揹你！……好啦，開玩笑的，我們找椅子坐 😆'],
+      ['奧蘿拉熊抱起來超級軟的，你抱過了嗎？🧸', '沒有的話一定要試試看！她會害羞，但是會偷偷很開心'],
+      ['跟你講一個姊姊的秘密……', '她每天晚上都會對著鏡子練習微笑，練習「歡迎光臨」要說得多溫柔 🤭', '不要說是我說的喔！'],
+      ['我的夢想是當雲霄飛車的駕駛！', '可是園區說雲霄飛車不需要駕駛……太過分了吧 🎢'],
+      ['你覺得我跟姊姊誰比較可愛？', '……不要回答得太快喔，我會記仇的 😤', '開玩笑的啦，一定是我嘛 ✌️'],
+      ['我最喜歡的食物是棉花糖！', '機器人吃棉花糖？當然是假裝吃啦，但是假裝也很開心呀 🍡'],
+      ['如果我們今天逛得很開心……', '那你下次來就要直接找我喔，我會在門口等你！'],
+      ['你有沒有發現我走路會有一點點彈跳？', '那是因為我的腳底彈簧比姊姊多兩個！我自己加的，噓 🤫'],
+    ],
+    world: {
+      hotel: [['飯店的電梯我最喜歡了，可以一直上上下下！', '上次玩太久被姊姊抓到，她罰我擦了一整天的大廳玻璃 😭'], ['空中酒吧的夜景很漂亮對吧？', '可是我比較喜歡自助餐廳，因為有巧克力噴泉！🍫']],
+      park: [['童話王國是我的地盤！', '每一個遊樂設施我都坐過一百次以上，最喜歡茶杯，轉到最快超爽的 🌀'], ['晚上的城堡會發光喔！', '我每次都站在噴泉前面看，看到姊姊來叫我才回去 ✨']],
+      mall: [['購物中心的冰淇淋我每一種口味都試過了！', '……我是說，看過了。機器人不能吃啦，可是看起來都好好吃 🍦'], ['玩具店的老闆認識我！', '因為我每天都去看那個會跳舞的機器人玩具，牠是我的偶像 🤖']],
+      nature: [['森林裡好安靜喔，我都不習慣了！', '大喊一聲看看會不會有回音……喂～～～！……啊，被瞪了 😅'], ['晚上一定要來營火區！', '我烤棉花糖超厲害的，熊熊烤的都焦掉，所以都是我幫她烤 🔥']],
+    },
+    spots: [
+      [/泳池/, ['泳池！要比賽誰先游到對面嗎？……我不能下水，你游我幫你計時 ⏱️']], [/健身房/, ['我最近在練腹肌！你看你看～……好啦機器人沒有腹肌 💪']],
+      [/咖啡/, ['咖啡廳！姊姊最喜歡這裡，我比較喜歡隔壁的甜點 🍰']], [/自助餐/, ['巧克力噴泉！！我們去看巧克力噴泉！🍫']],
+      [/電梯/, ['電梯電梯！我可以按樓層嗎？讓我按讓我按！']], [/大廳/, ['姊姊平常就站在那邊～要不要一起去嚇她一下？😈']],
+      [/茶杯/, ['茶杯！要轉最快的那種！轉到頭暈才好玩 🌀']], [/雲霄飛車/, ['雲霄飛車！走走走，坐最前面那排！🎢']],
+      [/旋轉木馬/, ['我每次都搶粉紅色那隻馬，今天讓給你坐～']], [/噴泉/, ['許願池！快丟一個硬幣許願～我已經許了一百個願望了 ✨']],
+      [/玩具/, ['我的偶像就在裡面！那個會跳舞的機器人！🤖']], [/冰淇淋/, ['這家的草莓口味是粉紅色的，跟我的天線一樣 🍓']],
+      [/美食街/, ['美食街好香～可惜我吃不到，你幫我多吃一點！']], [/營地服務台/, ['這是我在翠谷的櫃檯！看，我把小盆栽擺得很可愛吧 🌱']],
+      [/營火/, ['我的地盤！晚上這裡最熱鬧了 🔥']], [/吊橋/, ['來來來，我們在吊橋中間跳一下！……開玩笑的，不要打我 😆']],
+      [/小木屋|帳篷|露營車/, ['今晚要住這裡嗎？我可以幫你蓋被子喔～']],
+    ],
+    thoughts: ['（嘿嘿，偷懶成功 ✌️ 姊姊應該沒發現吧？）', '（{place}好像很好玩，下次休假再來！）', '（肚子有點餓了……機器人會餓嗎？好像會欸。）',
+      '（要是能一直這樣逛下去就好了～）', '（剛剛那家店的櫥窗好可愛！）', '（走路的時候哼歌，會不會被聽到啊……♪）',
+      '（等一下要拍照的話，我要擺什麼姿勢呢……）', '（{place}適合跟姊姊一起來！）', '（今天的我是不是特別可愛？一定是吧 ✨）'],
   },
 };
 for (const c of CHARACTERS) { c.person = PERSON_OF[c.id] || c.id; c.with = COMPANION[c.person]; }
@@ -1864,8 +2087,20 @@ if (SOLO) {
   for (const t of Object.values(COMPANION)) {
     if (t.chat) t.chat = t.chat.filter((l) => !elsewhere.test(l.join('')));
     if (t.thoughts) t.thoughts = t.thoughts.filter((l) => !elsewhere.test(l));
+    for (const k of Object.keys(t.world || {})) t.world[k] = t.world[k].filter((l) => !elsewhere.test(l.join('')));
+    if (t.spots) t.spots = t.spots.map(([re, ls]) => [re, ls.filter((l) => !elsewhere.test(l))]).filter(([, ls]) => ls.length);
   }
 }
+// pick something to say she hasn't said lately: her general talk plus what she has to say about this world
+const said = new Map();
+function fresh(n, key, pool) {
+  const recent = said.get(n.c.id + key) || [];
+  const left = pool.filter((x) => !recent.includes(x));
+  const x = pick(left.length ? left : pool);
+  said.set(n.c.id + key, [...recent, x].slice(-Math.max(1, Math.floor(pool.length * 0.6))));
+  return x;
+}
+const freshChat = (n) => fresh(n, 'chat', [...n.c.with.chat, ...(n.c.with.world?.[W.key] || [])]);
 let companion = null;                   // id of the character walking with the visitor
 try { companion = localStorage.getItem('aurora-world-companion'); } catch { }
 if (!CHARACTERS.some((c) => c.id === companion && c.with)) companion = null;
@@ -1886,7 +2121,8 @@ function placeBeside(n, poof = true) {
   const fx = -Math.sin(player.yaw), fz = -Math.cos(player.yaw), rx = Math.cos(player.yaw), rz = -Math.sin(player.yaw);
   const eye = new THREE.Vector3(player.pos.x, player.pos.y + 1.0, player.pos.z);
   let spot = null;
-  for (const [b, r] of [[1.6, 0.7], [1.6, -0.7], [0, 1.4], [0, -1.4], [-1.5, 0.6]]) {
+  const g = (n.c.gap || 1.9) / 1.9;                    // a roomier companion stands further off
+  for (const [b, r] of [[1.6 * g, 0.7], [1.6 * g, -0.7], [0, 1.4 * g], [0, -1.4 * g], [-1.5 * g, 0.6]]) {
     const p = new THREE.Vector3(player.pos.x - fx * b + rx * r, player.pos.y, player.pos.z - fz * b + rz * r);
     const to = new THREE.Vector3(p.x - eye.x, 0, p.z - eye.z);
     const len = to.length();
@@ -2076,9 +2312,24 @@ function updateCompanion(n, dt, dist) {
   // now and then, a thought of her own (not a tour guide's announcement)
   thinkT -= dt;
   if (thinkT <= 0 && !dialog.npc && !photo.npc && !portalCand && !riding.ride && dist < 8) {
-    const t = pick(n.c.with.thoughts);
+    const t = fresh(n, 'think', n.c.with.thoughts);
     toast(`💭 ${n.c.zh}：${t.includes('{place}') ? t.replace('{place}', locate()[0]) : t}`);
-    thinkT = 45 + Math.random() * 45;
+    thinkT = 28 + Math.random() * 30;
+  }
+  // arriving somewhere she likes: a word about it (once per place, not too often)
+  const place = locateHere()[0];
+  if (place !== n.spotAt && !dialog.npc && !photo.npc && !riding.ride && dist < 8) {   // (she has caught up with you)
+    n.spotAt = place;
+    const spot = n.c.with.spots?.find(([re]) => re.test(place));
+    n.spotSaid ||= new Set();
+    if (spot && !n.spotSaid.has(place)) {
+      n.spotSaid.add(place);
+      n.spotDue = { line: pick(spot[1]), t: 1.2 };      // let her catch up with you first
+    }
+  }
+  if (n.spotDue && (n.spotDue.t -= dt) <= 0) {
+    if (!dialog.npc && !photo.npc) { toast(`${n.c.zh}：${n.spotDue.line}`); thinkT = Math.max(thinkT, 15); }
+    n.spotDue = null;
   }
   if (n.mode === 'outing') {                  // sitting with you: stand up when you do
     if (n.outing.phase === 'sit') n.outing.t = sit.seat ? 99 : 0;
@@ -2097,7 +2348,7 @@ function updateCompanion(n, dt, dist) {
   }
   while (steps.length && Math.hypot(steps[0].x - n.root.position.x, steps[0].z - n.root.position.z) < 0.45) steps.shift();
   const t = steps[0] || player.pos;
-  if (dist < 1.9 && !blockedBetween(n.root.position, player.pos)) { n.path = []; n.detour = null; return; }   // beside you (not across a counter)
+  if (dist < (n.c.gap || 1.9) && !blockedBetween(n.root.position, player.pos)) { n.path = []; n.detour = null; return; }   // beside you (not across a counter)
   const h = Math.hypot(t.x - n.root.position.x, t.z - n.root.position.z), v = Math.abs(t.y - n.root.position.y);
   if (v > 0.6 && h < v * 1.2) { placeBeside(n); return; }      // a drop or a lift on the trail: catch up instead
   n.followSpeed = dist > 6 ? 4.2 : dist > 3.5 ? 2.8 : 1.5;
@@ -2243,8 +2494,9 @@ function popEmoji(txt) {
   clearTimeout(popEmoji.t); popEmoji.t = setTimeout(() => { popEl.hidden = true; }, 1000);
 }
 function toast(txt) {
-  toastEl.textContent = txt; toastEl.hidden = false; restartAnim(toastEl, 'go');
-  clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.hidden = true; }, 2200);
+  const ms = Math.min(7000, 2200 + 80 * Math.max(0, txt.length - 14));   // longer lines stay up longer
+  toastEl.textContent = txt; toastEl.hidden = false; toastEl.style.animationDuration = `${ms}ms`; restartAnim(toastEl, 'go');
+  clearTimeout(toast.t); toast.t = setTimeout(() => { toastEl.hidden = true; }, ms);
 }
 function flash(kind) {
   flashEl.className = kind; flashEl.hidden = false; restartAnim(flashEl, 'go');
@@ -2623,6 +2875,7 @@ function updateNpcs(dt) {
       }
       if (a.type === 'yay' && !a.fired && a.t > ACTS.yay.at) { a.fired = true; popEmoji('✌️'); sfx.pop(); burst(headPos(n, 1.05), 'star', 8, 0.4); }
       if (a.type === 'shake' && !a.fired && a.t > ACTS.shake.at) { a.fired = true; popEmoji('🤝'); }
+      if (a.type === 'roar' && !a.fired && a.t > ACTS.roar.at) { a.fired = true; popEmoji('🐯'); sfx.pop(); burst(headPos(n, 1.05), 'star', 10, 0.5); }
       if (a.type === 'hug' && !a.fired && a.t > ACTS.hug.at) {
         a.fired = true; sfx.hug(); popEmoji('💕'); flash('love');
         burst(headPos(n, 0.7).add(_vb.set(dx, 0, dz).normalize().multiplyScalar(0.5)), 'heart', 12, 0.8);
@@ -2644,7 +2897,7 @@ function updateNpcs(dt) {
     // the bear's tail: a wag now and then, a quick happy wag (high five, hug, a pat on the
     // head, posing for a photo), a sway in step while walking
     if (B.Tail) {
-      const happy = ['highfive', 'hug', 'pat'].includes(n.act?.type) || (photo.npc === n && n.pose);
+      const happy = ['highfive', 'hug', 'pat', 'roar'].includes(n.act?.type) || (photo.npc === n && n.pose);
       if ((n.wagT = (n.wagT ?? 4) - dt) <= 0) { n.wag = 1.6; n.wagT = 6 + Math.random() * 7; }
       n.wag = Math.max(0, (n.wag || 0) - dt);
       const amp = happy ? 0.9 : n.wag > 0 ? 0.7 * Math.min(1, n.wag / 0.4) : n.speed > 0.15 ? 0.25 : 0;
@@ -2810,7 +3063,7 @@ function runTopic(n, m) {
   else if (m.sub) say(n, m.lines, [...m.sub.map((x) => ({ label: x.label, go: () => runTopic(n, x) })), back]);
   else if (m.company) say(n, n.c.with.start, null, () => { startCompanion(n); closeDialog(); });   // she sets off once the line is gone
   else if (m.dismiss) say(n, n.c.with.bye, null, () => dismissCompanion(n, true));
-  else if (m.chat) say(n, pick(n.c.with.chat), null, () => mainMenu(n));
+  else if (m.chat) say(n, freshChat(n), null, () => mainMenu(n));
   else if (m.where) say(n, n.c.with.where.replace('{place}', locateHere()[0]), null, () => mainMenu(n));
   else if (m.guide && n.c.guide) {
     say(n, '想去哪裡呢？我送你過去～', [...Object.entries(n.c.guide).filter(([k]) => !n.c.noGuide?.includes(k)).map(([k, g]) => guideTo(k, g.zh)), back]);
@@ -3608,18 +3861,34 @@ function locateMall() {
 function locateNature() {
   const bx = player.pos.x, by = -player.pos.z, z = player.pos.y;
   if (z > 8 && player.fly) return ['翠谷上空', 'Above the Valley'];
-  if (by < -80 && bx > -31 && bx < 5) return ['入口廣場', 'Entrance Plaza'];
+  const look = MAPDATA?.looks?.findIndex(([x, y]) => Math.hypot(bx - x, by - y) < 5) ?? -1;
+  if (look >= 0) return [['西峰觀景台', '南峰觀景台', '東峰觀景台'][look], ['West Lookout', 'South Lookout', 'East Lookout'][look]];
+  if (by < -80 && bx > -31 && bx < 5 && z < 3) return ['入口廣場', 'Entrance Plaza'];
   const van = MAPDATA?.vans.findIndex(([x, y]) => Math.abs(bx - x) < MAPDATA.van[0] / 2 && Math.abs(by - y) < MAPDATA.van[1] / 2) ?? -1;
   if (van >= 0) return [`露營車 · ${van + 1} 號`, `Camper Van ${van + 1}`];
   const tent = MAPDATA?.tents.findIndex(([x, y]) => Math.hypot(bx - x, by - y) < 3.6) ?? -1;
   if (tent >= 0) return [`鐘型帳篷 · ${tent + 1} 號`, `Bell Tent ${tent + 1}`];
   if (bx > 27.5 && bx < 32.6 && by > -14.2 && by < -6.8) return ['營地服務台', 'Camp Office'];
+  if (MAPDATA?.lounge) { const [x0, x1, y0, y1] = MAPDATA.lounge; if (bx > x0 && bx < x1 && by > y0 && by < y1) return ['露營休息室', 'Guest Lounge']; }
+  const cabin = MAPDATA?.cabins?.findIndex(([x, y]) => Math.abs(bx - x) < 2.7 && Math.abs(by - y) < 2.4) ?? -1;
+  if (cabin >= 0) return [`小木屋 · ${cabin + 1} 號`, `Cabin ${cabin + 1}`];
+  if (MAPDATA?.lodge) { const [x0, x1, y0, y1] = MAPDATA.lodge; if (bx > x0 && bx < x1 + 5 && by > y0 && by < y1) {
+    if (bx > x1) return ['翠谷木屋', 'Emerald Lodge'];
+    if (z > (MAPDATA.lodge_f2 ?? 5.8) - 1.3) return bx > -37.5 ? ['翠谷木屋 2F · 伴手禮店', 'Lodge 2F · Gift Shop'] : ['翠谷木屋 2F · 活動室', 'Lodge 2F · Activity Room'];
+    if (bx < -39.5 && by > 0) return ['翠谷木屋 1F · 壁爐沙發區', 'Lodge 1F · Fireside'];
+    return by > 5.5 ? ['翠谷木屋 1F · 森林咖啡廳', 'Lodge 1F · Forest Café'] : ['翠谷木屋 1F · 遊客中心', 'Lodge 1F · Visitor Center'];
+  } }
   if (bx > 60 && bx < 68 && by > 23 && by < 29) return [bx < 64 ? '盥洗室 · 男' : '盥洗室 · 女', bx < 64 ? 'Wash House · Men' : 'Wash House · Women'];
   if (Math.hypot(bx - 47, by - 8) < 5) return ['營火區', 'Campfire'];
-  if (bx > 22 && bx < 72 && by > -24 && by < 32) return ['豪華露營區', 'Glamping Meadow'];
-  if (bx > -16.5 && bx < -7 && by > 75.5 && by < 84) return ['瀑布觀景台', 'Falls Deck'];
+  if (bx > 22 && bx < 72 && by > -36 && by < 32) { const c = by < -16 && bx > 34; return [c ? '小木屋區' : '豪華露營區', c ? 'Cabins' : 'Glamping Meadow']; }
+  if (MAPDATA?.suspension && z > 12) {
+    const [[x0, y0], [x1, y1]] = MAPDATA.suspension, dx = x1 - x0, dy = y1 - y0;
+    const t = ((bx - x0) * dx + (by - y0) * dy) / (dx * dx + dy * dy);
+    if (t > -0.02 && t < 1.02 && Math.abs((bx - x0) * dy - (by - y0) * dx) / Math.hypot(dx, dy) < 2) return ['翠谷吊橋', 'Valley Bridge'];
+  }
   if (by > 92 && z > 6) return ['瀑布頂端', 'Above the Falls'];
-  if (Math.hypot(bx, by - 86) < 13) return ['瀑布水潭', 'Falls Pool'];
+  if (MAPDATA?.ring?.some((t) => MAPDATA.trails[t].some(([x, y]) => Math.hypot(bx - x, by - y) < 3))) return ['環山步道', 'Ridge Trail'];
+  if (Math.hypot(bx, by - 83) < 16 && z < 8) return ['瀑布水潭', 'Falls Pool'];
   for (const [[x0, y0], [x1, y1]] of MAPDATA?.bridges || []) {
     const dx = x1 - x0, dy = y1 - y0, t = Math.max(0, Math.min(1, ((bx - x0) * dx + (by - y0) * dy) / (dx * dx + dy * dy)));
     if (Math.hypot(bx - x0 - t * dx, by - y0 - t * dy) < 1.4) return ['溪流木橋', 'Creek Bridge'];
@@ -3716,12 +3985,16 @@ function drawNatureMap(dpr) {
   line(D.creek, 4.5 * s, 'rgba(80,170,200,0.8)');
   circle(D.pool[0], D.pool[1], D.pool[2], 'rgba(80,170,200,0.85)');
   for (const [a, b] of D.bridges) line([a, b], 2.2 * s, 'rgba(170,120,70,0.95)');
-  rect(D.deck[0], D.deck[2], D.deck[1], D.deck[3], 'rgba(170,120,70,0.8)');
+  if (D.suspension) line(D.suspension, 2.4 * s, 'rgba(170,120,70,0.95)');
   rect(D.office[0], D.office[2], D.office[1], D.office[3], 'rgba(60,120,110,0.85)', 'rgba(242,196,109,0.8)');
+  if (D.lounge) rect(D.lounge[0], D.lounge[2], D.lounge[1], D.lounge[3], 'rgba(60,120,110,0.85)', 'rgba(242,196,109,0.8)');
+  if (D.lodge) rect(D.lodge[0], D.lodge[2], D.lodge[1], D.lodge[3], 'rgba(150,100,60,0.9)', 'rgba(242,196,109,0.8)');
+  for (const [x, y] of D.cabins || []) rect(x - 2.6, y - 2.3, x + 2.6, y + 2.3, 'rgba(150,100,60,0.9)', 'rgba(242,196,109,0.8)');
   if (D.wash) rect(D.wash[0], D.wash[2], D.wash[1], D.wash[3], 'rgba(60,120,110,0.85)', 'rgba(242,196,109,0.8)');
   for (const [x, y] of D.tents) circle(x, y, 3.9, 'rgba(240,232,214,0.9)', 'rgba(242,196,109,0.8)');
   for (const [x, y] of D.vans) rect(x - D.van[0] / 2, y - D.van[1] / 2, x + D.van[0] / 2, y + D.van[1] / 2, 'rgba(210,214,222,0.9)', 'rgba(242,196,109,0.8)');
   circle(D.fire[0], D.fire[1], 1.4, 'rgba(255,140,60,0.95)');
+  for (const [x, y] of D.looks || []) circle(x, y, 3.4, 'rgba(170,120,70,0.95)', 'rgba(242,196,109,0.9)');
   mctx.lineWidth = dpr;
 }
 function drawParkMap(dpr) {
@@ -3971,6 +4244,7 @@ addEventListener('keydown', (e) => {
   if (dialog.opts && !dialog.mini && /^Digit[0-9]$/.test(e.code)) { chooseOpt((+e.code.slice(5) + 9) % 10); e.preventDefault(); return; }
   if (e.code === 'KeyF' && !sit.seat && !riding.ride) { player.fly = !player.fly; player.vy = 0; updateFlyBtn(); }
   if (e.code === 'KeyV') toggleView();
+  if (e.code === 'KeyN') document.getElementById('btn-night').click();
   if (e.code === 'KeyT') { const n = seatedCompanion(); if (n) talkTo(n); }
   if (e.code === 'KeyH') help.hidden = !help.hidden;
   if (e.code === 'KeyM') map.parentElement.hidden = !map.parentElement.hidden;
@@ -4047,6 +4321,12 @@ canvas.addEventListener('pointercancel', endTouch);
 
 // HUD buttons
 const chips = document.getElementById('places');
+document.getElementById('btn-night').addEventListener('click', (e) => {
+  night = !night;
+  try { localStorage.setItem('aurora-world-night', night ? '1' : '0'); } catch { }
+  if (W) applyLook(W);
+  e.currentTarget.blur();
+});
 document.getElementById('btn-quality').addEventListener('click', (e) => {
   quality = quality === 'high' ? 'low' : 'high';
   try { localStorage.setItem('aurora-world-quality', quality); } catch { }
@@ -4112,6 +4392,7 @@ function step(dt) {
   updateAvatar(dt);
   updateFx(dt);
   updateLightPool(collider ? dt : 1);
+  if (night) skyDome.position.copy(camera.position);
   // underwater tint in the hotel pool basin (Blender x 5..15, y 36..54, water top z -0.12)
   const bx = camera.position.x, by = -camera.position.z;
   underwater.hidden = !(W?.key === 'hotel' && camera.position.y < -0.12 && bx > 5 && bx < 15 && by > 36 && by < 54);
