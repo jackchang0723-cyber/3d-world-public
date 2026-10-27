@@ -68,6 +68,67 @@
   .controls dd { margin: 0; color: var(--muted); }
   .touch-only { display: none; }
   @media (pointer: coarse) { .touch-only { display: block; } .mouse-only { display: none; } }
+  /* the intro: a small travel guidebook on cream paper, one page at a time */
+  .book {
+    position: relative; width: min(460px, 100%); display: grid; gap: 14px; justify-items: center;
+  }
+  .pages {
+    position: relative; width: 100%; aspect-ratio: 3 / 4; max-height: min(66vh, 620px); perspective: 1400px;
+  }
+  .page {
+    position: absolute; inset: 0; overflow: auto; padding: 30px clamp(20px, 6vw, 34px) 26px;
+    background: linear-gradient(90deg, #e9dcc0 0, #f7efdd 5%, #fbf5e8 60%, #f4ead3 100%);
+    color: #2a2440; border-radius: 3px 10px 10px 3px;
+    box-shadow: 0 18px 40px rgba(5, 8, 25, 0.55), inset 6px 0 10px -6px rgba(90, 60, 20, 0.35), inset 0 0 0 1px rgba(160, 120, 50, 0.25);
+    transform-origin: left center; transform: rotateY(-90deg); opacity: 0; pointer-events: none;
+    transition: transform .55s cubic-bezier(.3,.7,.2,1), opacity .3s;
+    display: grid; align-content: start; gap: 12px; -webkit-user-select: text; user-select: text;
+  }
+  .page.is-on { transform: none; opacity: 1; pointer-events: auto; }
+  .page.is-past { transform: rotateY(-100deg); opacity: 0; }
+  .page::after {
+    content: attr(data-n); position: absolute; bottom: 10px; left: 0; right: 0; text-align: center;
+    font: 400 11px var(--display); color: #a08a5c; letter-spacing: 0.2em;
+  }
+  .page.cover::after { content: none; }
+  .page h3 { margin: 0; font: 400 clamp(24px, 6vw, 30px)/1.15 var(--display); color: #1e2458; }
+  .page .kicker { margin: 0; font: 600 10px/1 var(--body); letter-spacing: 0.24em; text-transform: uppercase; color: #b08a3e; }
+  .page .note { margin: 4px 0 0; font-size: 13px; color: #5c5470; border-top: 1px dashed rgba(160, 120, 50, 0.45); padding-top: 10px; }
+  .page kbd { color: #8a6420; border-color: rgba(160, 120, 50, 0.6); background: rgba(255, 255, 255, 0.6); margin-right: 2px; }
+  .page .controls { font-size: 14px; gap: 10px 14px; }
+  @media (pointer: coarse) { .page .controls.touch-only { display: grid; } }
+  .page .controls dd { color: #4a4360; }
+  .cover {
+    background: radial-gradient(ellipse at 50% 30%, #2f3790 0%, #161d48 70%); color: var(--cream);
+    box-shadow: 0 18px 40px rgba(5, 8, 25, 0.6), inset 0 0 0 1px rgba(242, 196, 109, 0.5);
+    align-content: center;
+  }
+  .cover-frame {
+    border: 1px solid var(--line); outline: 1px solid rgba(242, 196, 109, 0.18); outline-offset: 6px;
+    padding: 34px 18px; display: grid; gap: 12px; justify-items: center; text-align: center;
+  }
+  .cover .kicker { color: var(--gold); }
+  .cover-title { margin: 0; font: 400 clamp(36px, 10vw, 52px)/1 var(--display); letter-spacing: 0.06em; text-wrap: balance; }
+  .cover-sub { margin: 0; color: var(--muted); letter-spacing: 0.2em; }
+  .cover-rule { width: 60px; height: 1px; background: var(--gold); }
+  .cover-here { margin: 0; font-size: 13px; color: var(--muted); }
+  .cover-here b { color: var(--gold); font-weight: 600; }
+  .spots { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .spots li { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: center; }
+  .spots .ico { font-size: 22px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: rgba(176, 138, 62, 0.14); }
+  .spots b { display: block; font-weight: 600; color: #1e2458; }
+  .spots span:not(.ico) { display: block; font-size: 12.5px; color: #5c5470; }
+  .book-nav { display: flex; align-items: center; gap: 14px; }
+  .bk-btn {
+    width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel);
+    font-size: 22px; line-height: 1; color: var(--gold);
+  }
+  .bk-btn:disabled { opacity: 0.3; cursor: default; }
+  .dots { display: flex; gap: 8px; }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(242, 196, 109, 0.3); transition: background .2s, transform .2s; }
+  .dots i.on { background: var(--gold); transform: scale(1.25); }
+  .book .enter { justify-self: center; min-width: 180px; }
+  @media (prefers-reduced-motion: reduce) { .page { transition: opacity .2s; } }
   .enter {
     justify-self: start; background: var(--gold); color: var(--ink); border: 0; border-radius: 2px;
     padding: 12px 22px; font-weight: 600; letter-spacing: 0.08em;
@@ -365,27 +426,65 @@
 </section>
 
 <section id="intro" class="screen" hidden>
-  <div class="card">
-    <div class="stars" aria-hidden="true">✦ ★ ✦</div>
-    <h2>歡迎來到 Aurora World</h2>
-    <p>這裡有四個世界：Grand Aurora 五星級大飯店、星光童話王國主題樂園、極光購物中心，和有山林溪流與豪華露營區的翠谷自然公園。你現在在<b id="intro-where">飯店</b>。每個世界都有一座金色傳送門（飯店在正門廣場西側、樂園、購物中心和自然公園在入口廣場西側），走到傳送門前按 <kbd>E</kbd> 選擇要去的世界；按 <kbd>P</kbd> 或右下角的「傳送門」按鈕可以直接走到傳送門前。</p>
-    <dl class="controls mouse-only">
-      <dt><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></dt><dd>行走（滑鼠轉動視角）</dd>
-      <dt><kbd>Shift</kbd></dt><dd>快跑</dd>
-      <dt><kbd>Space</kbd></dt><dd>跳躍</dd>
-      <dt><kbd>E</kbd></dt><dd>在傳送門前選擇目的地（再按 <kbd>1</kbd> / <kbd>2</kbd>）；坐下 / 起身；搭乘遊樂設施 / 下車；在電梯門前呼叫電梯</dd>
-      <dt><kbd>P</kbd></dt><dd>走到這個世界的傳送門前</dd>
-      <dt><kbd>V</kbd></dt><dd>切換第一／第三人稱（第三人稱時滾輪拉近拉遠）</dd>
-      <dt><kbd>F</kbd></dt><dd>切換飛行模式（<kbd>E</kbd> 上升、<kbd>Q</kbd> 下降）</dd>
-      <dt><kbd>1</kbd>–<kbd>0</kbd></dt><dd>瞬間移動到目前世界的各區域</dd>
-      <dt><kbd>Esc</kbd></dt><dd>釋放滑鼠</dd>
-    </dl>
-    <dl class="controls touch-only">
-      <dt>左半邊拖曳</dt><dd>行走（推到底會快跑）</dd>
-      <dt>右半邊拖曳</dt><dd>轉動視角</dd>
-      <dt>傳送 / 搭乘 / 坐下</dt><dd>走到傳送門、遊樂設施入口、椅子或電梯門前，點畫面中間出現的按鈕</dd>
-      <dt>下方按鈕</dt><dd>傳送門、快速傳送（各區域）和設定（角色、第一／第三人稱、地圖、飛行模式、白天／夜晚、畫質、說明）</dd>
-    </dl>
+  <div class="book" role="region" aria-roledescription="導覽手冊" aria-label="Aurora World 旅遊導覽手冊">
+    <div class="pages">
+      <article class="page cover is-on" data-n="0">
+        <div class="cover-frame">
+          <div class="stars" aria-hidden="true">✦ ★ ✦</div>
+          <p class="kicker">Travel Guide · 旅遊導覽手冊</p>
+          <h2 class="cover-title">Aurora World</h2>
+          <p class="cover-sub">五個世界，一扇傳送門</p>
+          <div class="cover-rule" aria-hidden="true"></div>
+          <p class="cover-here">你現在在 <b id="intro-where">飯店</b></p>
+        </div>
+      </article>
+      <article class="page" data-n="1">
+        <p class="kicker">Destinations · 目的地</p>
+        <h3>五個世界</h3>
+        <ul class="spots">
+          <li><span class="ico" aria-hidden="true">🏨</span><div><b>Grand Aurora 大飯店</b><span>大廳、泳池、客房、頂樓空中酒吧</span></div></li>
+          <li><span class="ico" aria-hidden="true">🏰</span><div><b>星光童話王國</b><span>城堡、旋轉木馬、雲霄飛車都能搭</span></div></li>
+          <li><span class="ico" aria-hidden="true">🛍️</span><div><b>極光購物中心</b><span>三層樓的商店、美食街、電影院</span></div></li>
+          <li><span class="ico" aria-hidden="true">🌲</span><div><b>翠谷自然公園</b><span>瀑布、吊橋、環山步道、豪華露營</span></div></li>
+          <li><span class="ico" aria-hidden="true">✈️</span><div><b>極光國際機場</b><span>報到、安檢、免稅店，走上飛機</span></div></li>
+        </ul>
+        <p class="note">每個世界都有金色<b>傳送門</b>，走到門前按 <kbd>E</kbd> 就能出發。</p>
+      </article>
+      <article class="page" data-n="2">
+        <p class="kicker">How to Play · 玩法</p>
+        <h3>基本操作</h3>
+        <dl class="controls mouse-only">
+          <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>走路，滑鼠看四周</dd>
+          <dt><kbd>E</kbd></dt><dd>對話、坐下、搭乘、開門</dd>
+          <dt><kbd>1</kbd>–<kbd>0</kbd></dt><dd>快速傳送到各區域</dd>
+          <dt><kbd>P</kbd></dt><dd>走到傳送門前</dd>
+          <dt><kbd>V</kbd> / <kbd>F</kbd></dt><dd>第三人稱 / 飛行</dd>
+        </dl>
+        <dl class="controls touch-only">
+          <dt>左邊拖曳</dt><dd>走路</dd>
+          <dt>右邊拖曳</dt><dd>看四周</dd>
+          <dt>中間按鈕</dt><dd>對話、坐下、搭乘</dd>
+          <dt>下方按鈕</dt><dd>傳送門、快速傳送、設定</dd>
+        </dl>
+        <p class="note">更多說明在右下角「設定 → 說明」。</p>
+      </article>
+      <article class="page" data-n="3">
+        <p class="kicker">Friends · 旅途夥伴</p>
+        <h3>認識大家</h3>
+        <ul class="spots friends">
+          <li><span class="ico" aria-hidden="true">🐻</span><div><b>奧蘿拉熊</b><span>飯店 · 慢吞吞、愛甜點的女僕熊</span></div></li>
+          <li><span class="ico" aria-hidden="true">🐯</span><div><b>虎寶</b><span>童話王國 · 大嗓門的冒險家</span></div></li>
+          <li><span class="ico" aria-hidden="true">🦊</span><div><b>小楓</b><span>購物中心 · 成熟又溫柔的狐狸</span></div></li>
+          <li><span class="ico" aria-hidden="true">🤖</span><div><b>米雅 &amp; 米露</b><span>各地服務台的機器人姊妹</span></div></li>
+        </ul>
+        <p class="note">走近按 <kbd>E</kbd> 聊天；選「陪我逛逛」，她會一路跟著你。</p>
+      </article>
+    </div>
+    <nav class="book-nav" aria-label="翻頁">
+      <button class="bk-btn bk-prev" type="button" aria-label="上一頁">‹</button>
+      <div class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <button class="bk-btn bk-next" type="button" aria-label="下一頁">›</button>
+    </nav>
     <button id="btn-enter" class="enter" type="button">開始探索</button>
   </div>
 </section>
@@ -464,6 +563,44 @@
     setTimeout(function () {
       if (!window.__worldBoot) { t.textContent = '程式沒有啟動。請關閉後重新打開，或用 Safari / Chrome 開啟連結。'; window.__diag('module never started'); }
     }, 20000);
+  })();
+</script>
+<script>
+  // the guidebook: flip with the arrows, the dots' page, a swipe or the arrow keys
+  (function () {
+    var book = document.querySelector('#intro .book');
+    if (!book) return;
+    var pages = book.querySelectorAll('.page'), dots = book.querySelectorAll('.dots i');
+    var prev = book.querySelector('.bk-prev'), next = book.querySelector('.bk-next'), at = 0;
+    function show(n) {
+      at = Math.max(0, Math.min(pages.length - 1, n));
+      for (var i = 0; i < pages.length; i++) {
+        pages[i].classList.toggle('is-on', i === at);
+        pages[i].classList.toggle('is-past', i < at);
+        if (dots[i]) dots[i].classList.toggle('on', i === at);
+      }
+      prev.disabled = at === 0; next.disabled = at === pages.length - 1;
+    }
+    var touched = 0;                                  // a tap fires touchend and then click: act once
+    function tap(el, fn) {
+      el.addEventListener('click', function () { if (Date.now() - touched > 600) fn(); });
+      el.addEventListener('touchend', function (e) { e.preventDefault(); touched = Date.now(); fn(); });
+    }
+    tap(prev, function () { show(at - 1); });
+    tap(next, function () { show(at + 1); });
+    var x0 = null;
+    book.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    book.addEventListener('touchmove', function (e) {
+      if (x0 === null) return;
+      var dx = e.touches[0].clientX - x0;
+      if (Math.abs(dx) > 50) { show(at + (dx < 0 ? 1 : -1)); x0 = null; }
+    }, { passive: true });
+    addEventListener('keydown', function (e) {
+      if (document.getElementById('intro').hidden) return;
+      if (e.key === 'ArrowRight') show(at + 1);
+      if (e.key === 'ArrowLeft') show(at - 1);
+    });
+    show(0);
   })();
 </script>
 <script type="importmap">

@@ -1,0 +1,20 @@
+{
+ "exterior": 185800,
+ "shell": 86833,
+ "hall": 795473,
+ "security": 139679,
+ "shops": 86572,
+ "cafe": 100990,
+ "concourse": 32631,
+ "gate": 163526,
+ "plane": 99080,
+ "city": 15816,
+ "dutyfree": 204280,
+ "travel": 35350,
+ "gifts": 34527,
+ "apron": 39833,
+ "bridge": 17505,
+ "cabin": 110148,
+ "textures": 890812,
+ "textures_small": 344505
+}
